@@ -101,7 +101,11 @@ def buscar_metas_todas(ano, mes):
     df.columns = [c.strip() for c in df.columns]
 
     def to_num(v):
-        try: return float(str(v or "0").replace("R$","").replace(".","").replace(",",".").strip())
+        import math
+        try:
+            if v is None: return 0.0
+            if isinstance(v, float) and math.isnan(v): return 0.0
+            return float(str(v).replace("R$","").replace(".","").replace(",",".").strip() or "0")
         except: return 0.0
 
     col_ano  = next((c for c in df.columns if norm(c) == "ano"), None)
