@@ -127,7 +127,7 @@ def buscar_metas_todas(ano, mes):
 
         nome_raw = str(row[col_nome]).strip() if col_nome else ""
         meta_reu = to_num(row[col_reu]) if col_reu else 0.0
-        meta_fin = to_num(row[col_fin]) if col_fin else 0.0
+        meta_fin = (to_num(row[col_fin]) if col_fin else 0.0) / 10
         dias_ut  = 0
         if col_du:
             try: dias_ut = int(float(str(row[col_du] or 0)))
@@ -206,10 +206,14 @@ def calcular_abril():
     du_sheet = next((m["dias_uteis"] for m in closers_metas if m["dias_uteis"] > 0), 0)
     du_total = du_sheet if du_sheet > 0 else du_calc
 
+    SQUADS_PERMITIDOS = {"sniper", "elite", "mgm"}
+
     squad_data = {}
     for m in closers_metas:
         nn  = m["nome_norm"]
         sub = nome_to_subarea.get(nn) or "Outros"
+        if norm(sub) not in SQUADS_PERMITIDOS:
+            continue
         ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
         if sub not in squad_data:
             squad_data[sub] = {"nome": sub, "meta": 0, "realizado": 0, "realizado_multi": 0, "qtd": 0}
