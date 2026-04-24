@@ -12,7 +12,7 @@ import calendar
 from datetime import date, datetime
 from io import StringIO
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='.')
 app.secret_key = os.environ.get("SECRET_KEY", "boardacademy2026secret")
 
 # ── CONFIG (variáveis de ambiente no Render) ─────────────────
