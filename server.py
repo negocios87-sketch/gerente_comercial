@@ -166,6 +166,36 @@ def buscar_deals_mes(mes, ano):
         start += 500
     return todos
 
+
+def buscar_qual_ids():
+    """Retorna {norm(label): str(id)} para o campo qualificador"""
+    resp = req.get(f"{BASE_V1}/dealFields", params={"api_token": API_KEY}, timeout=15)
+    resp.raise_for_status()
+    for field in (resp.json().get("data") or []):
+        if field.get("key") == CF_QUALIFICADOR:
+            return {norm(opt.get("label", "")): str(opt.get("id")) for opt in (field.get("options") or [])}
+    return {}
+
+def buscar_activities_mes(mes, ano):
+    todos, cursor = [], None
+    mes_str = f"{ano}-{mes:02d}"
+    while True:
+        params = {"filter_id": FILTER_ACTIVITIES, "limit": 200}
+        if cursor:
+            params["cursor"] = cursor
+        resp = req.get(f"{BASE_V2}/activities", params=params,
+                       headers={"x-api-token": API_KEY}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        lote = data.get("data") or []
+        for act in lote:
+            if str(act.get("due_date", ""))[:7] == mes_str:
+                todos.append(act)
+        cursor = data.get("additional_data", {}).get("next_cursor")
+        if not cursor or not lote:
+            break
+    return todos
+
 def calcular_abril():
     hoje = date.today()
     mes, ano = hoje.month, hoje.year
@@ -249,6 +279,96 @@ def calcular_abril():
     t_multi = sum(sd["realizado_multi"] for sd in squad_data.values())
     t_qtd   = sum(sd["qtd"]            for sd in squad_data.values())
 
+
+    # ── SDRs ──────────────────────────────────────────────────
+    qual_ids   = buscar_qual_ids()
+    activities = buscar_activities_mes(mes, ano)
+
+    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
+
+    # Mapa reunião válida: deal_id -> CF_REUNIAO_VALID
+    mapa_rv = {d["id"]: cf(d, CF_REUNIAO_VALID) for d in deals}
+
+    def act_valida(act):
+        if not (act.get("done") is True or act.get("status") == "done"):
+            return False
+        rv = mapa_rv.get(act.get("deal_id"))
+        return rv is None or str(rv).strip() == "" or norm(str(rv)) == "sim"
+
+    # Atividades por owner
+    acts_by_owner = {}
+    for act in activities:
+        oid = str(act.get("owner_id", ""))
+        acts_by_owner.setdefault(oid, []).append(act)
+
+    sdrs_metas = [m for m in metas if m["meta_reu"] > 0 and m["meta_fin"] > 0]
+
+    sdrs = []
+    for m in sdrs_metas:
+        nn       = m["nome_norm"]
+        meta_reu = m["meta_reu"]
+        meta_fin = m["meta_fin"] / 10  # mesmo ajuste dos closers
+
+        uid     = nome_norm_to_uid.get(nn)
+        uid_str = str(uid) if uid else ""
+        acts_sdr = acts_by_owner.get(uid_str, [])
+
+        validadas     = [a for a in acts_sdr if act_valida(a)]
+        qtd_validadas = len(validadas)
+
+        deveria_estar = arred(safe_div(meta_reu, du_total) * du_pass)
+        faltam        = arred(deveria_estar - qtd_validadas)
+        pct_reu       = arred(safe_div(qtd_validadas, meta_reu) * 100)
+
+        qual_id    = qual_ids.get(nn)
+        deals_sdr  = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
+        qtd_ganhos = len(deals_sdr)
+        valor_ganho      = sum(float(d.get("value") or 0) for d in deals_sdr)
+        valor_ganho_multi = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
+        pct_ganhos  = arred(safe_div(valor_ganho_multi, meta_fin) * 100)
+        ticket      = arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0
+        pct_final   = arred((pct_reu + pct_ganhos) / 2)
+
+        sdrs.append({
+            "nome":               m["nome"],
+            "meta_reuniao":       meta_reu,
+            "meta_diaria":        arred(safe_div(meta_reu, du_total)),
+            "validadas":          qtd_validadas,
+            "deveria_estar":      deveria_estar,
+            "faltam":             faltam,
+            "pct_reu":            pct_reu,
+            "meta_ganho":         arred(meta_fin),
+            "qtd_ganhos":         qtd_ganhos,
+            "valor_ganho":        arred(valor_ganho),
+            "valor_ganho_multi":  arred(valor_ganho_multi),
+            "pct_ganhos":         pct_ganhos,
+            "ticket_medio":       ticket,
+            "pct_final":          pct_final,
+        })
+
+    # Total SDR
+    if sdrs:
+        t_reu   = sum(s["meta_reuniao"] for s in sdrs)
+        t_valid = sum(s["validadas"] for s in sdrs)
+        t_meta_g = sum(s["meta_ganho"] for s in sdrs)
+        t_valor  = sum(s["valor_ganho"] for s in sdrs)
+        t_multi  = sum(s["valor_ganho_multi"] for s in sdrs)
+        t_qtd    = sum(s["qtd_ganhos"] for s in sdrs)
+        t_dev    = sum(s["deveria_estar"] for s in sdrs)
+        t_pct_r  = arred(safe_div(t_valid, t_reu) * 100)
+        t_pct_g  = arred(safe_div(t_multi, t_meta_g) * 100)
+        sdrs.append({
+            "nome": "TOTAL", "meta_reuniao": t_reu,
+            "meta_diaria": arred(safe_div(t_reu, du_total)),
+            "validadas": t_valid, "deveria_estar": arred(t_dev),
+            "faltam": arred(t_dev - t_valid),
+            "pct_reu": t_pct_r, "meta_ganho": arred(t_meta_g),
+            "qtd_ganhos": t_qtd, "valor_ganho": arred(t_valor),
+            "valor_ganho_multi": arred(t_multi),
+            "pct_ganhos": t_pct_g, "ticket_medio": arred(safe_div(t_valor, t_qtd)) if t_qtd else 0,
+            "pct_final": arred((t_pct_r + t_pct_g) / 2),
+        })
+
     return {
         "periodo": {
             "mes": mes, "ano": ano,
@@ -260,6 +380,7 @@ def calcular_abril():
             "total":  build_row("MTD Faturamento", t_meta, t_real, t_multi, t_qtd),
             "meta_120": arred(t_meta * 1.2),
         },
+        "sdrs": sdrs,
         "_debug": {
             "total_metas": len(metas),
             "closers_encontrados": len(closers_metas),
