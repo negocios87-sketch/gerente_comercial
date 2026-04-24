@@ -257,6 +257,7 @@ def calcular_abril():
             "closers_encontrados": len(closers_metas),
             "deals_mes": len(deals),
             "nomes_closers": [m["nome"] for m in closers_metas],
+            "todos_abril": [{"nome": m["nome"], "meta_reu": m["meta_reu"], "meta_fin": m["meta_fin"]} for m in metas],
             "subareas": {m["nome"]: nome_to_subarea.get(m["nome_norm"], "NAO ENCONTRADO") for m in closers_metas},
         }
     }
