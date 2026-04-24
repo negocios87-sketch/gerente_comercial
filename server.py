@@ -289,12 +289,23 @@ def abril():
         return redirect("/login")
     return render_template("abril.html", nome=session["nome"])
 
+def limpar_nans(obj):
+    """Substitui NaN/inf por None recursivamente para JSON válido"""
+    import math
+    if isinstance(obj, dict):
+        return {k: limpar_nans(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [limpar_nans(v) for v in obj]
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    return obj
+
 @app.route("/api/abril")
 def api_abril():
     if "nome" not in session:
         return jsonify({"erro": "Não autenticado"}), 401
     try:
-        return jsonify(calcular_abril())
+        return jsonify(limpar_nans(calcular_abril()))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
