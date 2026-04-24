@@ -367,6 +367,69 @@ function setModo(multi) {
   document.querySelectorAll('.col-com').forEach(el => el.style.display = multi ? '' : 'none');
 }
 
+
+// ── SDR TABLE ─────────────────────────────────────────────
+function makeSdrRow(s, cls = '') {
+  return `
+    <tr class="${cls}">
+      <td>${s.nome}</td>
+      <td>${N(s.meta_reuniao)}</td>
+      <td>${s.meta_diaria.toFixed(1)}</td>
+      <td>${N(s.validadas)}</td>
+      <td>${s.deveria_estar.toFixed(0)}</td>
+      <td>${s.faltam <= 0
+        ? `<span class="surplus">${N(Math.abs(s.faltam))}</span>`
+        : `<span class="deficit">${N(s.faltam)}</span>`}</td>
+      <td>${pctBadge(s.pct_reu)}</td>
+      <td>${R(s.meta_ganho)}</td>
+      <td>${N(s.qtd_ganhos)}</td>
+      <td>${R(s.valor_ganho)}</td>
+      <td class="val-multi">${R(s.valor_ganho_multi)}</td>
+      <td>${pctBadge(s.pct_ganhos)}</td>
+      <td>${R(s.ticket_medio)}</td>
+      <td>${pctBadge(s.pct_final)}</td>
+    </tr>`;
+}
+
+function renderSdrs(sdrs) {
+  const body  = sdrs.filter(s => s.nome !== 'TOTAL');
+  const total = sdrs.find(s => s.nome === 'TOTAL');
+  return `
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">SDR's</div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align:left">SDR</th>
+                <th>Meta Reunião</th>
+                <th>Meta Diária</th>
+                <th>Validadas</th>
+                <th>Deveriam Estar</th>
+                <th>Faltam</th>
+                <th>% Ating. Reu.</th>
+                <th>Meta Ganho</th>
+                <th>Qtd Ganhos</th>
+                <th>R$ Ganho</th>
+                <th>R$ c/ Multi</th>
+                <th>% Ganhos</th>
+                <th>Ticket Médio</th>
+                <th>% Final</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${body.map(s => makeSdrRow(s)).join('')}
+              ${total ? makeSdrRow(total, 'row-total') : ''}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
 // ── RENDER ────────────────────────────────────────────────────
 function makeRow(row, cls = '') {
   return `
