@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Board Academy — Login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0A0A0A;
+      font-family: 'Arial', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .card {
+      background: #131313;
+      border: 1px solid #2A2A2A;
+      border-radius: 12px;
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 0 40px rgba(255,215,0,0.06);
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .logo h1 {
+      color: #FFD700;
+      font-size: 20px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .logo p {
+      color: #666;
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 1px;
+    }
+    label {
+      display: block;
+      color: #999;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    input {
+      width: 100%;
+      background: #0A0A0A;
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      color: #F0F0F0;
+      font-size: 15px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color .2s;
+      margin-bottom: 18px;
+    }
+    input:focus { border-color: #FFD700; }
+    button {
+      width: 100%;
+      background: #FFD700;
+      color: #0A0A0A;
+      font-size: 15px;
+      font-weight: bold;
+      padding: 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      letter-spacing: 1px;
+      transition: background .2s;
+    }
+    button:hover { background: #FFC000; }
+    .erro {
+      background: rgba(255,50,50,.1);
+      border: 1px solid rgba(255,50,50,.3);
+      border-radius: 6px;
+      color: #ff6b6b;
+      font-size: 13px;
+      padding: 10px 14px;
+      margin-bottom: 18px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <h1>Board Academy</h1>
+      <p>FORECAST COMERCIAL</p>
+    </div>
+    {% if erro %}
+      <div class="erro">{{ erro }}</div>
+    {% endif %}
+    <form method="POST" action="/login">
+      <label>Usuário</label>
+      <input type="text" name="usuario" placeholder="seu.nome" autocomplete="username" required>
+      <label>Senha</label>
+      <input type="password" name="senha" placeholder="••••••••" autocomplete="current-password" required>
+      <button type="submit">ENTRAR</button>
+    </form>
+  </div>
+</body>
+</html>

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: board-forecast
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app
+    envVars:
+      - key: PIPE_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FILTER_DEALS
+        value: "74674"
+      - key: FILTER_ACTIVITIES
+        value: "1310451"
