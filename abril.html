@@ -3,468 +3,470 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Forecast Abril — Board Academy</title>
+  <title>Forecast Comercial — Board Academy</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --gold:      #FFD700;
-      --gold-mid:  #FFC000;
-      --gold-dark: #A67C00;
-      --bg:        #0A0A0A;
-      --bg-a:      #131313;
-      --bg-b:      #0E0E0E;
-      --white:     #F0F0F0;
-      --gray:      #555;
-      --green:     #00E676;
-      --red:       #FF5252;
-      --border:    #1E1E1E;
+      --gold:      #B8860B;
+      --gold-lt:   #D4A017;
+      --gold-bg:   #FFF9E6;
+      --navy:      #1A1A2E;
+      --navy-lt:   #2C2C4A;
+      --bg:        #F4F5F7;
+      --white:     #FFFFFF;
+      --text:      #1E1E2E;
+      --text-muted:#6B7280;
+      --border:    #E2E4E9;
+      --green:     #0D7A3E;
+      --green-bg:  #ECFDF5;
+      --red:       #B91C1C;
+      --red-bg:    #FEF2F2;
+      --amber:     #92400E;
+      --amber-bg:  #FFFBEB;
+      --shadow:    0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+      --shadow-md: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
     }
 
     body {
       background: var(--bg);
-      color: var(--white);
-      font-family: Arial, sans-serif;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       font-size: 13px;
-      min-height: 100vh;
+      line-height: 1.5;
     }
 
-    /* ── TOP BAR ── */
-    .topbar {
+    /* ── HEADER ── */
+    .header {
+      background: var(--navy);
+      padding: 0 28px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 24px;
-      background: #0E0E0E;
-      border-bottom: 1px solid var(--border);
+      height: 56px;
       position: sticky;
       top: 0;
       z-index: 100;
+      box-shadow: var(--shadow-md);
     }
-    .topbar-left { display: flex; align-items: center; gap: 24px; }
-    .brand { color: var(--gold); font-weight: bold; font-size: 15px; letter-spacing: 1px; }
-    .periodo-info { color: var(--gray); font-size: 11px; }
-    .periodo-info span { color: var(--gold-dark); font-weight: bold; }
-    .topbar-right { display: flex; align-items: center; gap: 16px; }
-    .update-time { color: var(--gray); font-size: 11px; font-style: italic; }
-    .btn-logout {
-      color: var(--gray); font-size: 11px; text-decoration: none;
-      border: 1px solid var(--border); border-radius: 4px;
-      padding: 4px 10px; transition: color .2s;
+    .header-left { display: flex; align-items: center; gap: 28px; }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
     }
-    .btn-logout:hover { color: var(--gold); }
-
-    /* ── TABS ── */
-    .tabs {
-      display: flex;
-      gap: 2px;
-      padding: 12px 24px 0;
-      border-bottom: 1px solid var(--border);
+    .brand-bar {
+      width: 3px; height: 22px;
+      background: var(--gold);
+      border-radius: 2px;
     }
-    .tab {
-      padding: 8px 20px;
-      font-size: 12px;
-      font-weight: bold;
-      letter-spacing: 1px;
+    .brand-text {
+      color: var(--white);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: .5px;
+    }
+    .brand-sub {
+      color: var(--gold);
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      font-weight: 600;
       text-transform: uppercase;
-      cursor: pointer;
-      border-radius: 6px 6px 0 0;
-      border: 1px solid transparent;
-      border-bottom: none;
-      color: var(--gray);
+    }
+    .periodo-badge {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 6px;
+      padding: 4px 12px;
+      color: rgba(255,255,255,.75);
+      font-size: 12px;
+    }
+    .periodo-badge strong { color: var(--gold); }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    .update-info { color: rgba(255,255,255,.45); font-size: 11px; }
+    .btn-logout {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 5px;
+      color: rgba(255,255,255,.6);
+      font-size: 11px;
+      padding: 5px 12px;
+      text-decoration: none;
       transition: all .2s;
     }
-    .tab:hover { color: var(--gold-dark); }
-    .tab.active {
-      background: var(--bg-a);
-      border-color: var(--border);
-      color: var(--gold);
-    }
+    .btn-logout:hover { border-color: var(--gold); color: var(--gold); }
 
-    /* ── MAIN CONTENT ── */
-    .content { padding: 20px 24px; }
-    .panel { display: none; }
-    .panel.active { display: block; }
-
-    /* ── SECTION HEADER ── */
-    .section-title {
-      color: var(--gold-dark);
-      font-size: 11px;
-      font-weight: bold;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      padding: 0 0 8px;
-      margin-bottom: 12px;
+    /* ── TABS ── */
+    .tab-bar {
+      background: var(--white);
       border-bottom: 1px solid var(--border);
-    }
-
-    /* ── TABLES ── */
-    .table-wrap { overflow-x: auto; margin-bottom: 32px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    thead th {
-      background: #0D0D0D;
-      color: var(--gold-dark);
-      font-size: 10px;
-      letter-spacing: .5px;
-      text-transform: uppercase;
-      padding: 8px 12px;
-      text-align: right;
-      white-space: nowrap;
-      border-bottom: 1px solid var(--border);
-    }
-    thead th:first-child { text-align: left; }
-
-    tbody tr:nth-child(odd)  { background: var(--bg-a); }
-    tbody tr:nth-child(even) { background: var(--bg-b); }
-    tbody tr.total-row {
-      background: #111 !important;
-      border-top: 1px solid var(--gold-dark);
-    }
-    tbody tr.meta120-row { background: #0C0C0C !important; }
-
-    td {
-      padding: 9px 12px;
-      text-align: right;
-      white-space: nowrap;
-      border-bottom: 1px solid #111;
-    }
-    td:first-child { text-align: left; font-weight: bold; }
-
-    .squad-name { color: var(--white); }
-    .total-row td { color: var(--gold-mid); font-weight: bold; }
-    .meta120-row td { color: var(--gray); font-size: 11px; }
-    .meta120-row td:first-child { color: var(--gold-dark); }
-
-    .pct-cell { font-weight: bold; }
-    .pct-green  { color: var(--green); }
-    .pct-gold   { color: var(--gold); }
-    .pct-white  { color: var(--white); }
-    .pct-red    { color: var(--red); }
-
-    .deficit { color: var(--red); }
-    .val-real { color: var(--gold-mid); }
-
-    /* ── TOGGLE SEM/COM ── */
-    .toggle-wrap {
+      padding: 0 28px;
       display: flex;
-      gap: 6px;
-      margin-bottom: 14px;
+      gap: 0;
     }
-    .toggle-btn {
-      font-size: 11px;
-      font-weight: bold;
-      letter-spacing: .5px;
-      padding: 5px 14px;
-      border-radius: 4px;
-      border: 1px solid var(--border);
+    .tab {
+      padding: 12px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .3px;
       cursor: pointer;
-      background: transparent;
-      color: var(--gray);
-      transition: all .15s;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all .2s;
+      margin-bottom: -1px;
     }
-    .toggle-btn.active { background: var(--gold-dark); color: #000; border-color: var(--gold-dark); }
+    .tab:hover { color: var(--navy); }
+    .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
 
-    /* ── GERAL CARDS ── */
-    .geral-grid {
+    /* ── MAIN ── */
+    .main { padding: 24px 28px; max-width: 1600px; }
+
+    /* ── SECTION ── */
+    .section { margin-bottom: 28px; }
+    .section-header {
       display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 32px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
     }
-    .geral-card {
-      background: var(--bg-a);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 18px;
-      min-width: 180px;
-      flex: 1 1 180px;
-    }
-    .geral-card .gc-time {
-      font-size: 10px;
-      color: var(--gold-dark);
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--navy);
+      letter-spacing: .3px;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    .geral-card .gc-nome {
-      font-size: 14px;
-      font-weight: bold;
-      color: var(--white);
-      margin-bottom: 10px;
-    }
-    .geral-card .gc-pct {
-      font-size: 24px;
-      font-weight: bold;
-    }
-    .bar-bg {
-      height: 4px;
-      background: #222;
+    .section-title::before {
+      content: '';
+      width: 3px; height: 14px;
+      background: var(--gold);
       border-radius: 2px;
-      margin-top: 8px;
+    }
+
+    /* ── TOGGLE ── */
+    .toggle-group {
+      display: inline-flex;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
       overflow: hidden;
     }
-    .bar-fill {
-      height: 100%;
-      border-radius: 2px;
+    .toggle-btn {
+      padding: 6px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: all .15s;
+      letter-spacing: .3px;
+    }
+    .toggle-btn.active {
+      background: var(--navy);
+      color: var(--white);
     }
 
-    /* ── LOADING / ERROR ── */
-    .loading {
+    /* ── CARD ── */
+    .card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    /* ── TABLE ── */
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+
+    thead tr { background: var(--navy); }
+    thead th {
+      color: rgba(255,255,255,.7);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      padding: 10px 14px;
+      text-align: right;
+      white-space: nowrap;
+      border-right: 1px solid rgba(255,255,255,.06);
+    }
+    thead th:first-child { text-align: left; padding-left: 18px; }
+    thead th:last-child { border-right: none; }
+
+    /* Grupo headers */
+    .th-group {
+      background: rgba(255,255,255,.04);
+      color: var(--gold) !important;
+      font-size: 9px !important;
+      letter-spacing: 1px !important;
+      padding: 6px 14px !important;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      text-align: center !important;
+    }
+    .th-group:first-child { text-align: left !important; }
+
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: #F8F9FF; }
+    tbody tr:last-child { border-bottom: none; }
+
+    td {
+      padding: 11px 14px;
+      text-align: right;
+      white-space: nowrap;
+      color: var(--text);
+    }
+    td:first-child { text-align: left; padding-left: 18px; font-weight: 600; }
+
+    /* Linhas especiais */
+    .row-total {
+      background: var(--gold-bg) !important;
+      border-top: 2px solid var(--gold) !important;
+    }
+    .row-total td { font-weight: 700; color: var(--navy); }
+    .row-total td:first-child { color: var(--gold); }
+
+    .row-meta120 { background: var(--bg) !important; }
+    .row-meta120 td { color: var(--text-muted); font-style: italic; }
+    .row-meta120 td:first-child { color: var(--text-muted); font-weight: 600; }
+
+    /* Valores */
+    .val-real { color: var(--navy); font-weight: 600; }
+    .val-multi { color: #5B21B6; font-weight: 600; }
+
+    /* Badges de % */
+    .pct-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      min-width: 52px;
+    }
+    .pct-green  { background: var(--green-bg);  color: var(--green); }
+    .pct-amber  { background: var(--amber-bg);  color: var(--amber); }
+    .pct-red    { background: var(--red-bg);    color: var(--red); }
+
+    .deficit { color: var(--red); font-weight: 500; }
+    .surplus { color: var(--green); font-weight: 500; }
+
+    /* Separador de grupos */
+    .col-sep { border-left: 1px solid var(--border) !important; }
+
+    /* ── LOADING ── */
+    .loading-state {
       display: flex;
       align-items: center;
       justify-content: center;
-      height: 200px;
-      color: var(--gray);
-      font-size: 13px;
+      padding: 60px;
+      gap: 12px;
+      color: var(--text-muted);
     }
     .spinner {
-      width: 20px; height: 20px;
+      width: 18px; height: 18px;
       border: 2px solid var(--border);
-      border-top-color: var(--gold-dark);
+      border-top-color: var(--gold);
       border-radius: 50%;
-      animation: spin .8s linear infinite;
-      margin-right: 10px;
+      animation: spin .7s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error-msg {
-      color: var(--red);
-      padding: 20px;
-      text-align: center;
-      font-size: 13px;
-    }
+    .error-state { padding: 40px; text-align: center; color: var(--red); }
+
+    /* ── PANEL ── */
+    .panel { display: none; }
+    .panel.active { display: block; }
   </style>
 </head>
 <body>
 
-<!-- TOP BAR -->
-<div class="topbar">
-  <div class="topbar-left">
-    <span class="brand">BOARD ACADEMY</span>
-    <span class="periodo-info" id="periodo-info">Carregando...</span>
+<!-- HEADER -->
+<header class="header">
+  <div class="header-left">
+    <div class="brand">
+      <div class="brand-bar"></div>
+      <div>
+        <div class="brand-text">BOARD ACADEMY</div>
+        <div class="brand-sub">Forecast Comercial</div>
+      </div>
+    </div>
+    <div class="periodo-badge" id="periodo-badge">Carregando...</div>
   </div>
-  <div class="topbar-right">
-    <span class="update-time" id="update-time"></span>
+  <div class="header-right">
+    <span class="update-info" id="update-info"></span>
     <a href="/logout" class="btn-logout">Sair ({{ nome }})</a>
   </div>
-</div>
+</header>
 
 <!-- TABS -->
-<div class="tabs">
-  <div class="tab active" onclick="setTab('abril')">Abril</div>
-  <div class="tab" onclick="setTab('forecast')" title="Em breve">Forecast Diário</div>
+<div class="tab-bar">
+  <div class="tab active" onclick="setTab('abril')">Abril 2026</div>
+  <div class="tab" onclick="setTab('forecast')">Forecast Diário</div>
 </div>
 
-<!-- CONTENT -->
-<div class="content">
+<!-- MAIN -->
+<div class="main">
 
-  <!-- ABRIL PANEL -->
+  <!-- ABRIL -->
   <div class="panel active" id="panel-abril">
     <div id="abril-content">
-      <div class="loading"><div class="spinner"></div> Buscando dados no Pipedrive...</div>
+      <div class="card">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          Buscando dados no Pipedrive...
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- FORECAST DIÁRIO PANEL -->
+  <!-- FORECAST DIÁRIO -->
   <div class="panel" id="panel-forecast">
-    <div class="loading" style="color:#555">Em construção — chegando em breve.</div>
+    <div class="card">
+      <div class="loading-state" style="color:#9CA3AF">
+        Em construção — chegando em breve.
+      </div>
+    </div>
   </div>
 
 </div>
 
 <script>
-// ── TABS ───────────────────────────────────────────────────
+// ── TABS ──────────────────────────────────────────────────────
 function setTab(tab) {
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    t.classList.toggle('active', ['abril','forecast'][i] === tab);
-  });
-  document.querySelectorAll('.panel').forEach((p, i) => {
-    p.classList.toggle('active', ['panel-abril','panel-forecast'][i] === `panel-${tab}`);
-  });
+  document.querySelectorAll('.tab').forEach((t, i) =>
+    t.classList.toggle('active', ['abril','forecast'][i] === tab));
+  document.querySelectorAll('.panel').forEach((p, i) =>
+    p.classList.toggle('active', ['panel-abril','panel-forecast'][i] === `panel-${tab}`));
 }
 
-// ── FORMATAÇÃO ─────────────────────────────────────────────
+// ── FORMATAÇÃO ────────────────────────────────────────────────
 const R = v => 'R$ ' + Number(v).toLocaleString('pt-BR', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-const P = v => (v == null ? '—' : Number(v).toFixed(1) + '%');
+const P = v => v == null ? '—' : Number(v).toFixed(1) + '%';
 const N = v => Number(v).toLocaleString('pt-BR');
 
-function pctClass(pct) {
-  if (pct >= 100) return 'pct-green';
-  if (pct >= 60)  return 'pct-gold';
-  if (pct >= 30)  return 'pct-white';
-  return 'pct-red';
-}
-function barColor(pct) {
-  if (pct >= 100) return '#00E676';
-  if (pct >= 60)  return '#FFD700';
-  return '#FF5252';
+function pctBadge(pct) {
+  const cls = pct >= 100 ? 'pct-green' : pct >= 60 ? 'pct-amber' : 'pct-red';
+  return `<span class="pct-badge ${cls}">${P(pct)}</span>`;
 }
 
-// ── TOGGLE SEM/COM MULTIPLICADOR ──────────────────────────
+function deficitVal(v) {
+  if (v <= 0) return `<span class="surplus">${R(Math.abs(v))}</span>`;
+  return `<span class="deficit">${R(v)}</span>`;
+}
+
+// ── MODO SEM/COM MULTIPLICADOR ────────────────────────────────
 let modoMulti = false;
 function setModo(multi) {
   modoMulti = multi;
-  document.querySelectorAll('.toggle-btn').forEach((b, i) => b.classList.toggle('active', i === (multi ? 1 : 0)));
+  document.querySelectorAll('.toggle-btn').forEach((b, i) =>
+    b.classList.toggle('active', i === (multi ? 1 : 0)));
   document.querySelectorAll('.col-sem').forEach(el => el.style.display = multi ? 'none' : '');
   document.querySelectorAll('.col-com').forEach(el => el.style.display = multi ? '' : 'none');
 }
 
-// ── RENDER CLOSERS TABLE ───────────────────────────────────
-function renderClosers(data) {
-  const squads = data.closers.squads;
-  const total  = data.closers.total;
-  const m120   = data.closers.meta_120;
-
-  const allRows = [...squads, total];
-
-  const makeRow = (row, cls = '') => {
-    const pctSem = row.pct_mtd;
-    const pctCom = row.pct_atingido_multi;
-    return `
-      <tr class="${cls}">
-        <td class="squad-name">${row.nome}</td>
-        <td>${R(row.meta)}</td>
-        <!-- SEM MULTIPLICADOR -->
-        <td class="col-sem">${R(row.realizado)}</td>
-        <td class="col-sem val-real"><span class="pct-cell ${pctClass(row.pct_atingido)}">${P(row.pct_atingido)}</span></td>
-        <td class="col-sem">${R(row.mtd)}</td>
-        <td class="col-sem deficit">${R(row.deficit_mtd)}</td>
-        <td class="col-sem"><span class="pct-cell ${pctClass(pctSem)}">${P(pctSem)}</span></td>
-        <td class="col-sem deficit">${R(row.deficit_meta)}</td>
-        <td class="col-sem">${R(row.meta_dia_100)}</td>
-        <!-- COM MULTIPLICADOR -->
-        <td class="col-com" style="display:none">${R(row.realizado_multi)}</td>
-        <td class="col-com" style="display:none"><span class="pct-cell ${pctClass(pctCom)}">${P(pctCom)}</span></td>
-        <td class="col-com" style="display:none deficit">${R(row.deficit_meta_multi)}</td>
-        <td class="col-com" style="display:none">${R(row.meta_dia_100_multi)}</td>
-        <!-- PERFORMANCE -->
-        <td>${N(row.qtd_ganhos)}</td>
-        <td>${R(row.ticket_medio)}</td>
-      </tr>`;
-  };
-
+// ── RENDER ────────────────────────────────────────────────────
+function makeRow(row, cls = '') {
   return `
-    <div class="toggle-wrap">
-      <button class="toggle-btn active" onclick="setModo(false)">Sem Multiplicador</button>
-      <button class="toggle-btn" onclick="setModo(true)">Com Multiplicador</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="text-align:left">Squad</th>
-            <th>Meta</th>
-            <th class="col-sem">Realizado</th>
-            <th class="col-sem">% Ating.</th>
-            <th class="col-sem">Meta MTD</th>
-            <th class="col-sem">Déficit MTD</th>
-            <th class="col-sem">% MTD</th>
-            <th class="col-sem">Déficit 100%</th>
-            <th class="col-sem">Meta/Dia</th>
-            <th class="col-com" style="display:none">Real c/ Multi</th>
-            <th class="col-com" style="display:none">% c/ Multi</th>
-            <th class="col-com" style="display:none">Déficit 100% c/ Multi</th>
-            <th class="col-com" style="display:none">Meta/Dia c/ Multi</th>
-            <th>Qtd Ganhos</th>
-            <th>Ticket Médio</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${squads.map(r => makeRow(r)).join('')}
-          ${makeRow(total, 'total-row')}
-          <tr class="meta120-row">
-            <td>Meta 120%</td>
-            <td>${R(m120)}</td>
-            <td class="col-sem" colspan="7"></td>
-            <td class="col-com" style="display:none" colspan="4"></td>
-            <td colspan="2"></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>`;
-}
-
-// ── RENDER SDRs TABLE ──────────────────────────────────────
-function renderSDRs(sdrs) {
-  const makeRow = (s, cls = '') => `
     <tr class="${cls}">
-      <td>${s.nome}</td>
-      <td>${N(s.meta_reuniao)}</td>
-      <td>${s.meta_diaria.toFixed(1)}</td>
-      <td>${N(s.validadas)}</td>
-      <td>${s.deveria_estar.toFixed(0)}</td>
-      <td class="${s.faltam > 0 ? 'deficit' : 'pct-green'}">${s.faltam.toFixed(0)}</td>
-      <td><span class="pct-cell ${pctClass(s.pct_atingido)}">${P(s.pct_atingido)}</span></td>
-      <td>${R(s.meta_ganho)}</td>
-      <td>${N(s.qtd_ganhos)}</td>
-      <td class="val-real">${R(s.valor_ganho)}</td>
-      <td><span class="pct-cell ${pctClass(s.pct_ganhos)}">${P(s.pct_ganhos)}</span></td>
-      <td>${R(s.ticket_medio)}</td>
-      <td><span class="pct-cell ${pctClass(s.media_final)}">${P(s.media_final)}</span></td>
+      <td>${row.nome}</td>
+      <td>${R(row.meta)}</td>
+      <td>${N(row.dias_uteis)}</td>
+      <td>${R(row.meta_du)}</td>
+
+      <td class="col-sem val-real">${R(row.realizado)}</td>
+      <td class="col-sem">${pctBadge(row.pct_atingido)}</td>
+      <td class="col-sem">${R(row.mtd)}</td>
+      <td class="col-sem">${deficitVal(row.deficit_mtd)}</td>
+      <td class="col-sem">${pctBadge(row.pct_mtd)}</td>
+      <td class="col-sem">${deficitVal(row.deficit_meta)}</td>
+      <td class="col-sem">${R(row.meta_dia_100)}</td>
+
+      <td class="col-com col-sep val-multi" style="display:none">${R(row.realizado_multi)}</td>
+      <td class="col-com" style="display:none">${pctBadge(row.pct_atingido_multi)}</td>
+      <td class="col-com" style="display:none">${deficitVal(row.deficit_meta_multi)}</td>
+      <td class="col-com" style="display:none">${R(row.meta_dia_multi)}</td>
+
+      <td class="col-sep">${N(row.qtd_ganhos)}</td>
+      <td>${R(row.ticket_medio)}</td>
     </tr>`;
-
-  const body  = sdrs.filter(s => s.nome !== 'TOTAL');
-  const total = sdrs.find(s => s.nome === 'TOTAL');
-
-  return `
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="text-align:left">Team Leader</th>
-            <th>Meta Reunião</th>
-            <th>Meta Diária</th>
-            <th>Validadas</th>
-            <th>Deveria Estar</th>
-            <th>Faltam</th>
-            <th>% Ating.</th>
-            <th>Meta Ganho</th>
-            <th>Qtd Ganhos</th>
-            <th>$ Ganho</th>
-            <th>% Ganhos</th>
-            <th>Ticket Médio</th>
-            <th>Média Final</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${body.map(s => makeRow(s)).join('')}
-          ${total ? makeRow(total, 'total-row') : ''}
-        </tbody>
-      </table>
-    </div>`;
 }
 
-// ── RENDER GERAL CARDS ─────────────────────────────────────
-function renderGeral(geral) {
-  if (!geral.length) return '<p style="color:#555;font-size:12px">Sem dados</p>';
-  return `<div class="geral-grid">${geral.map(g => `
-    <div class="geral-card">
-      <div class="gc-time">${g.time || '—'}</div>
-      <div class="gc-nome">${g.nome}</div>
-      <div class="gc-pct ${pctClass(g.pct)}">${P(g.pct)}</div>
-      <div class="bar-bg">
-        <div class="bar-fill" style="width:${Math.min(g.pct, 100)}%;background:${barColor(g.pct)}"></div>
-      </div>
-    </div>`).join('')}</div>`;
-}
-
-// ── MAIN RENDER ────────────────────────────────────────────
 function renderAbril(data) {
   const p = data.periodo;
-  document.getElementById('periodo-info').innerHTML =
-    `Abril ${p.ano} &nbsp;|&nbsp; <span>${p.du_passados}</span>/${p.du_total} dias úteis &nbsp;|&nbsp; <span>${p.du_restantes}</span> restantes`;
-  document.getElementById('update-time').textContent = `Atualizado: ${p.atualizado_em}`;
+
+  document.getElementById('periodo-badge').innerHTML =
+    `Abril ${p.ano} &nbsp;·&nbsp; <strong>${p.du_passados}</strong>/${p.du_total} dias úteis &nbsp;·&nbsp; <strong>${p.du_restantes}</strong> restantes`;
+  document.getElementById('update-info').textContent = `Atualizado: ${p.atualizado_em}`;
+
+  const { squads, total, meta_120 } = data.closers;
+
+  // Aviso de debug se não tiver squads
+  const debugAviso = squads.length === 0 ? `
+    <div style="background:#FEF9C3;border:1px solid #FDE047;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#713F12">
+      <strong>Atenção:</strong> Nenhum closer encontrado nas metas.
+      Acesse <a href="/api/debug/metas" target="_blank" style="color:#92400E"><strong>/api/debug/metas</strong></a>
+      e me mostre o resultado para ajustar os dados.
+      ${data._debug ? `<br>Total de linhas lidas: ${data._debug.total_metas} | Closers: ${data._debug.closers_encontrados}` : ''}
+    </div>` : '';
 
   document.getElementById('abril-content').innerHTML = `
-    <div class="section-title">Closers — Performance por Squad</div>
-    ${renderClosers(data)}
-    <div class="section-title">SDR's</div>
-    ${renderSDRs(data.sdrs)}
-    <div class="section-title">Geral — Individual</div>
-    ${renderGeral(data.geral)}
-  `;
+    ${debugAviso}
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Performance por Squad — Closers</div>
+        <div class="toggle-group">
+          <button class="toggle-btn active" onclick="setModo(false)">Sem Multiplicador</button>
+          <button class="toggle-btn" onclick="setModo(true)">Com Multiplicador</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th class="th-group" rowspan="2" style="text-align:left">Squad</th>
+                <th class="th-group" rowspan="2">Meta</th>
+                <th class="th-group" rowspan="2">Dias Úteis</th>
+                <th class="th-group" rowspan="2">Meta / DU</th>
+                <th class="th-group col-sem" colspan="7">Sem Multiplicador</th>
+                <th class="th-group col-com col-sep" colspan="4" style="display:none">Com Multiplicador</th>
+                <th class="th-group col-sep" colspan="2">Performance</th>
+              </tr>
+              <tr>
+                <th class="col-sem">Realizado</th>
+                <th class="col-sem">% Ating.</th>
+                <th class="col-sem">MTD</th>
+                <th class="col-sem">Déficit MTD</th>
+                <th class="col-sem">% MTD</th>
+                <th class="col-sem">Déficit 100%</th>
+                <th class="col-sem">Meta/Dia</th>
+                <th class="col-com col-sep" style="display:none">Real c/ Multi</th>
+                <th class="col-com" style="display:none">% c/ Multi</th>
+                <th class="col-com" style="display:none">Déficit 100%</th>
+                <th class="col-com" style="display:none">Meta/Dia</th>
+                <th class="col-sep">Vol. Ganhos</th>
+                <th>Ticket Médio</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${squads.map(r => makeRow(r)).join('')}
+              ${makeRow(total, 'row-total')}
+              <tr class="row-meta120">
+                <td>Meta 120%</td>
+                <td>${R(meta_120)}</td>
+                <td colspan="15"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
 }
 
-// ── FETCH ──────────────────────────────────────────────────
+// ── FETCH ─────────────────────────────────────────────────────
 async function fetchAbril() {
   try {
     const res = await fetch('/api/abril');
@@ -472,14 +474,13 @@ async function fetchAbril() {
     const data = await res.json();
     if (data.erro) throw new Error(data.erro);
     renderAbril(data);
-  } catch (e) {
+  } catch(e) {
     document.getElementById('abril-content').innerHTML =
-      `<div class="error-msg">Erro ao carregar dados: ${e.message}</div>`;
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
     console.error(e);
   }
 }
 
-// Carrega agora e a cada 5 min
 fetchAbril();
 setInterval(fetchAbril, 5 * 60 * 1000);
 </script>
