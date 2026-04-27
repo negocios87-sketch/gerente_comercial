@@ -384,6 +384,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         acts_by_owner.setdefault(oid, []).append(act)
 
     SDRS_SQUADS = {"sniper", "elite", "mgm"}
+    if head_filter:
+        head_squads_sdr = get_head_squads(head_filter, colab_df)
+        SDRS_SQUADS = {s for s in head_squads_sdr if s in SDRS_SQUADS} or SDRS_SQUADS
     sdrs_metas = [
         m for m in metas
         if m["meta_reu"] > 0 and m["meta_fin"] > 0
@@ -394,7 +397,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     for m in sdrs_metas:
         nn       = m["nome_norm"]
         meta_reu = m["meta_reu"] / 10
-        meta_fin = m["meta_fin"] / 10
+        meta_fin = m["meta_fin"]
 
         uid     = nome_norm_to_uid.get(nn)
         uid_str = str(uid) if uid else ""
@@ -483,8 +486,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             total_pct_sdr = arred(sum(s["pct_final"] for s in sdr_rows) / len(sdr_rows)) if sdr_rows else 0
 
             total_final = arred((ating_closer + total_pct_sdr) / 2)
+            # Display names for squads (MGM -> Olympus)
+            equipe_names = []
+            for s in head_squads_n:
+                display = "Olympus" if s == "mgm" else s.capitalize()
+                equipe_names.append(display)
             head_results.append({
                 "nome": head_nome,
+                "equipes": equipe_names,
                 "ating_closer": ating_closer,
                 "ating_sdr": total_pct_sdr,
                 "total_final": total_final,
@@ -508,6 +517,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "closers_encontrados": len(closers_metas),
             "deals_mes": len(deals),
             "nomes_closers": [m["nome"] for m in closers_metas],
+            "head_squads_debug": {u: list(get_head_squads(u, colab_df)) for u in set(str(r.get(next((c for c in colab_df.columns if "head" in c.lower()), ""), "")).strip() for _, r in colab_df.iterrows()) if u},
             "todos_abril": [{"nome": m["nome"], "meta_reu": m["meta_reu"], "meta_fin": m["meta_fin"]} for m in metas],
             "subareas": {m["nome"]: nome_to_subarea.get(m["nome_norm"], "NAO ENCONTRADO") for m in closers_metas},
         }
