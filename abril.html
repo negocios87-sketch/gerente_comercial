@@ -531,7 +531,7 @@ function renderSdrs(sdrs) {
       // Group SDRs by subarea
       const groups = {};
       body.forEach(s => {
-        const sub = s.subarea || 'Outros';
+        const sub = (s.subarea || 'Outros').toUpperCase() === 'MGM' ? 'Olympus' : (s.subarea || 'Outros');
         if (!groups[sub]) groups[sub] = [];
         groups[sub].push(s);
       });
