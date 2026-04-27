@@ -303,6 +303,34 @@
     }
     .row-sdr-group.open td:first-child::before { transform: rotate(90deg); }
 
+
+    /* ── HEAD RESULTS ── */
+    .head-results { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+    .head-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--gold);
+      border-radius: 8px;
+      padding: 16px 20px;
+      min-width: 220px;
+      flex: 1 1 220px;
+      box-shadow: var(--shadow);
+    }
+    .head-card-name { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
+    .head-card-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; }
+    .head-card-label { color: var(--text-muted); }
+    .head-card-total { 
+      margin-top: 10px; padding-top: 10px; 
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 13px; font-weight: 700;
+    }
+    .badge-lider {
+      font-size: 9px; font-weight: 700; letter-spacing: .5px;
+      background: var(--gold-bg); color: var(--gold); border: 1px solid var(--gold);
+      border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+    }
+
     /* ── LOADING ── */
     .loading-state {
       display: flex;
@@ -424,26 +452,60 @@ function deficitVal(v) {
 }
 
 
+
+function renderHeadResults(heads) {
+  if (!heads || !heads.length) return '';
+  return `
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">Resultado por Head</div>
+      </div>
+      <div class="head-results">
+        ${heads.map(h => `
+          <div class="head-card">
+            <div class="head-card-name">${h.nome}</div>
+            <div class="head-card-row">
+              <span class="head-card-label">Closers c/ Multi</span>
+              <span>${pctBadge(h.ating_closer)}</span>
+            </div>
+            <div class="head-card-row">
+              <span class="head-card-label">SDR Final</span>
+              <span>${pctBadge(h.ating_sdr)}</span>
+            </div>
+            <div class="head-card-total">
+              <span>Total</span>
+              <span>${pctBadge(h.total_final)}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
 function buildMemberRow(row, groupId) {
   const pSem = row.pct_atingido ?? 0;
   const pCom = row.pct_atingido_multi ?? 0;
+  const isHead = row.is_head;
+  const nomeLbl = isHead ? `${row.nome} <span class="badge-lider">LÍDER</span>` : row.nome;
+  const metaVal = row.meta > 0 ? R(row.meta) : '—';
+  const pctSemVal = row.meta > 0 ? pctBadge(pSem) : '—';
+  const pctComVal = row.meta > 0 ? pctBadge(pCom) : '—';
   return `
     <tr class="row-member" data-member="${groupId}">
-      <td>${row.nome}</td>
-      <td>${R(row.meta)}</td>
-      <td>—</td>
-      <td>—</td>
-      <td class="col-sem">${R(row.realizado)}</td>
-      <td class="col-sem">${pctBadge(pSem)}</td>
-      <td class="col-sem">—</td>
-      <td class="col-sem">—</td>
-      <td class="col-sem">—</td>
-      <td class="col-sem">${R(row.deficit_meta ?? (row.meta - row.realizado))}</td>
-      <td class="col-sem">—</td>
-      <td class="col-com col-sep" style="display:none">${R(row.realizado_multi)}</td>
-      <td class="col-com" style="display:none">${pctBadge(pCom)}</td>
-      <td class="col-com" style="display:none">—</td>
-      <td class="col-com" style="display:none">—</td>
+      <td>${nomeLbl}</td>
+      <td>${metaVal}</td>
+      <td>${row.meta > 0 ? N(row.dias_uteis) : '—'}</td>
+      <td>${row.meta > 0 ? R(row.meta_du) : '—'}</td>
+      <td class="col-sem val-real">${R(row.realizado)}</td>
+      <td class="col-sem">${pctSemVal}</td>
+      <td class="col-sem">${row.meta > 0 ? R(row.mtd) : '—'}</td>
+      <td class="col-sem">${row.meta > 0 ? deficitVal(row.deficit_mtd) : '—'}</td>
+      <td class="col-sem">${row.meta > 0 ? pctBadge(row.pct_mtd) : '—'}</td>
+      <td class="col-sem">${row.meta > 0 ? deficitVal(row.deficit_meta) : '—'}</td>
+      <td class="col-sem">${row.meta > 0 ? R(row.meta_dia_100) : '—'}</td>
+      <td class="col-com col-sep val-multi" style="display:none">${R(row.realizado_multi)}</td>
+      <td class="col-com" style="display:none">${pctComVal}</td>
+      <td class="col-com" style="display:none">${row.meta > 0 ? deficitVal(row.deficit_meta_multi) : '—'}</td>
+      <td class="col-com" style="display:none">${row.meta > 0 ? R(row.meta_dia_multi) : '—'}</td>
       <td class="col-sep">${N(row.qtd_ganhos)}</td>
       <td>${R(row.ticket_medio)}</td>
     </tr>`;
@@ -698,7 +760,8 @@ function renderAbril(data) {
         </div>
       </div>
     </div>
-    ${data.sdrs && data.sdrs.length ? renderSdrs(data.sdrs) : ''}
+    ${data.head_results && data.head_results.length ? renderHeadResults(data.head_results) : ''}
+  ${data.sdrs && data.sdrs.length ? renderSdrs(data.sdrs) : ''}
   `;
 }
 
