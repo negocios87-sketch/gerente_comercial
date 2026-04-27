@@ -27,6 +27,7 @@ CF_REUNIAO_VALID = "7299bf170c5deab9b4fd8c2275f55faf51984dea"
 
 URL_COLAB = os.environ.get("URL_COLAB", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1782440078&single=true&output=csv")
 URL_METAS = os.environ.get("URL_METAS", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=0&single=true&output=csv")
+URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1010928978&single=true&output=csv")
 URL_USERS = os.environ.get("URL_USERS", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=160245570&single=true&output=csv")
 
 def norm(s):
@@ -58,26 +59,44 @@ def get_owner_name(deal):
     if isinstance(uid, dict): return uid.get("name", "")
     return ""
 
-def du_mes_total(ano, mes):
+def du_mes_total(ano, mes, feriados=set()):
     return sum(1 for d in range(1, calendar.monthrange(ano, mes)[1] + 1)
-               if date(ano, mes, d).weekday() < 5)
+               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
 
-def du_passados(ano, mes):
+def du_passados(ano, mes, feriados=set()):
     hoje = date.today()
     return max(sum(1 for d in range(1, min(hoje.day, calendar.monthrange(ano, mes)[1]) + 1)
-                   if date(ano, mes, d).weekday() < 5), 1)
+                   if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados), 1)
 
-def du_restantes(ano, mes):
+def du_restantes(ano, mes, feriados=set()):
     hoje = date.today()
     ultimo = calendar.monthrange(ano, mes)[1]
     return sum(1 for d in range(hoje.day + 1, ultimo + 1)
-               if date(ano, mes, d).weekday() < 5)
+               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
 
 def ler_sheet(url):
     resp = req.get(url, timeout=15)
     resp.encoding = "utf-8"
     resp.raise_for_status()
     return pd.read_csv(StringIO(resp.text))
+
+
+def buscar_feriados():
+    """Retorna set de date com todos os feriados da planilha"""
+    try:
+        df = ler_sheet(URL_FERIADOS)
+        feriados = set()
+        for _, row in df.iterrows():
+            val = str(row.iloc[0]).strip()
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y"):
+                try:
+                    feriados.add(datetime.strptime(val, fmt).date())
+                    break
+                except:
+                    continue
+        return feriados
+    except:
+        return set()
 
 def buscar_usuario(usuario, senha):
     df = ler_sheet(URL_USERS)
@@ -196,13 +215,15 @@ def buscar_activities_mes(mes, ano):
             break
     return todos
 
-def calcular_abril():
+def calcular_abril(mes=None, ano=None):
     hoje = date.today()
-    mes, ano = hoje.month, hoje.year
+    mes = mes or hoje.month
+    ano = ano or hoje.year
 
-    du_calc = du_mes_total(ano, mes)
-    du_pass = du_passados(ano, mes)
-    du_rest = du_restantes(ano, mes)
+    feriados = buscar_feriados()
+    du_calc = du_mes_total(ano, mes, feriados)
+    du_pass = du_passados(ano, mes, feriados)
+    du_rest = du_restantes(ano, mes, feriados)
 
     colab_df   = buscar_colaboradores()
     metas      = buscar_metas_todas(ano, mes)
@@ -456,7 +477,9 @@ def api_abril():
     if "nome" not in session:
         return jsonify({"erro": "Não autenticado"}), 401
     try:
-        return jsonify(limpar_nans(calcular_abril()))
+        mes = request.args.get("mes", type=int)
+        ano = request.args.get("ano", type=int)
+        return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano)))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
