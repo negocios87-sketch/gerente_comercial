@@ -526,7 +526,9 @@ function renderAbril(data) {
           </table>
         </div>
       </div>
-    </div>`;
+    </div>
+    ${data.sdrs && data.sdrs.length ? renderSdrs(data.sdrs) : ''}
+  `;
 }
 
 // ── FETCH ─────────────────────────────────────────────────────
