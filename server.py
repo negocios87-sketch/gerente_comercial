@@ -115,6 +115,19 @@ def buscar_colaboradores():
         df = df[df[status_col].apply(lambda x: norm(str(x)) == "ativo")]
     return df
 
+def get_head_squads(nome_head, colab_df):
+    """Retorna set de subareas que o head lidera"""
+    head_col = next((c for c in colab_df.columns if "head" in c.lower()), None)
+    if not head_col:
+        return set()
+    squads = set()
+    for _, row in colab_df.iterrows():
+        if norm(str(row.get(head_col, ""))) == norm(nome_head):
+            sub = str(row.get("Subarea", "")).strip()
+            if sub:
+                squads.add(norm(sub))
+    return squads
+
 def buscar_metas_todas(ano, mes):
     df = ler_sheet(URL_METAS)
     df.columns = [c.strip() for c in df.columns]
@@ -215,7 +228,7 @@ def buscar_activities_mes(mes, ano):
             break
     return todos
 
-def calcular_abril(mes=None, ano=None):
+def calcular_abril(mes=None, ano=None, head_filter=None):
     hoje = date.today()
     mes = mes or hoje.month
     ano = ano or hoje.year
@@ -252,12 +265,24 @@ def calcular_abril(mes=None, ano=None):
         closer_real[owner_nome]["valor_multi"] += valor_multi
         closer_real[owner_nome]["qtd"]         += 1
 
+    # Include head's own deals in their squad (head may not have meta entry)
+    for uid, uname in users_pipe.items():
+        nn = norm(uname)
+        head_squads_check = get_head_squads(uname, colab_df)
+        if head_squads_check and nn not in closer_real:
+            # Head has deals but no meta entry — still count their sales
+            pass  # already in closer_real if they have deals
+
     closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
 
     du_sheet = next((m["dias_uteis"] for m in closers_metas if m["dias_uteis"] > 0), 0)
     du_total = du_sheet if du_sheet > 0 else du_calc
 
     SQUADS_PERMITIDOS = {"sniper", "elite", "mgm"}
+    if head_filter:
+        head_squads = get_head_squads(head_filter, colab_df)
+        # intersect with allowed
+        SQUADS_PERMITIDOS = {s for s in head_squads if s in SQUADS_PERMITIDOS} or SQUADS_PERMITIDOS
 
     squad_data = {}
     squad_members = {}  # sub -> list of individual rows
@@ -277,6 +302,7 @@ def calcular_abril(mes=None, ano=None):
         squad_members[sub].append({
             "nome": m["nome"], "meta": m["meta_fin"],
             "realizado": ri["valor"], "realizado_multi": ri["valor_multi"], "qtd": ri["qtd"],
+            "is_head": False,
         })
 
     def build_row(nome, meta, real, real_multi, qtd):
@@ -297,6 +323,26 @@ def calcular_abril(mes=None, ano=None):
             "qtd_ganhos": qtd,
             "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
         }
+
+    # Add head's own sales to their squad
+    for uid, uname in users_pipe.items():
+        head_squads_h = get_head_squads(uname, colab_df)
+        for hs in head_squads_h:
+            display_sub = next((k for k in squad_data if norm(k) == hs), None)
+            if display_sub and norm(uname) in closer_real:
+                ri = closer_real[norm(uname)]
+                # Add to squad totals
+                squad_data[display_sub]["realizado"]       += ri["valor"]
+                squad_data[display_sub]["realizado_multi"] += ri["valor_multi"]
+                squad_data[display_sub]["qtd"]             += ri["qtd"]
+                # Add as member if not already there
+                existing = [m["nome"] for m in squad_members.get(display_sub, [])]
+                if uname not in existing:
+                    squad_members[display_sub].append({
+                        "nome": uname, "meta": 0,
+                        "realizado": ri["valor"], "realizado_multi": ri["valor_multi"],
+                        "qtd": ri["qtd"], "is_head": True,
+                    })
 
     squads = []
     for sub, sd in squad_data.items():
@@ -347,8 +393,8 @@ def calcular_abril(mes=None, ano=None):
     sdrs = []
     for m in sdrs_metas:
         nn       = m["nome_norm"]
-        meta_reu = m["meta_reu"]
-        meta_fin = m["meta_fin"]
+        meta_reu = m["meta_reu"] / 10
+        meta_fin = m["meta_fin"] / 10
 
         uid     = nome_norm_to_uid.get(nn)
         uid_str = str(uid) if uid else ""
@@ -412,6 +458,38 @@ def calcular_abril(mes=None, ano=None):
             "pct_final": arred((t_pct_r + t_pct_g) / 2),
         })
 
+    # ── Head result rows ─────────────────────────────────────
+    head_col = next((c for c in colab_df.columns if "head" in c.lower()), None)
+    head_results = []
+    if head_col:
+        heads_seen = set()
+        for _, row in colab_df.iterrows():
+            head_nome = str(row.get(head_col, "")).strip()
+            sub = norm(str(row.get("Subarea", "")).strip())
+            if not head_nome or head_nome in heads_seen or sub not in SQUADS_PERMITIDOS:
+                continue
+            heads_seen.add(head_nome)
+            # Closer atingimento for this head's squads
+            head_squads_n = get_head_squads(head_nome, colab_df)
+            sq_rows = [s for s in squads if norm(s["nome"]) in head_squads_n or
+                       (norm(s["nome"]) == "olympus" and "mgm" in head_squads_n)]
+            total_meta_c = sum(s["meta"] for s in sq_rows)
+            total_multi_c = sum(s["realizado_multi"] for s in sq_rows)
+            ating_closer = arred(safe_div(total_multi_c, total_meta_c) * 100) if total_meta_c else 0
+
+            # SDR atingimento
+            sdr_rows = [s for s in sdrs if s["nome"] != "TOTAL" and
+                        norm(nome_to_subarea.get(norm(s["nome"]), "")) in head_squads_n]
+            total_pct_sdr = arred(sum(s["pct_final"] for s in sdr_rows) / len(sdr_rows)) if sdr_rows else 0
+
+            total_final = arred((ating_closer + total_pct_sdr) / 2)
+            head_results.append({
+                "nome": head_nome,
+                "ating_closer": ating_closer,
+                "ating_sdr": total_pct_sdr,
+                "total_final": total_final,
+            })
+
     return {
         "periodo": {
             "mes": mes, "ano": ano,
@@ -424,6 +502,7 @@ def calcular_abril(mes=None, ano=None):
             "meta_120": arred(t_meta * 1.2),
         },
         "sdrs": sdrs,
+        "head_results": head_results,
         "_debug": {
             "total_metas": len(metas),
             "closers_encontrados": len(closers_metas),
@@ -479,7 +558,11 @@ def api_abril():
     try:
         mes = request.args.get("mes", type=int)
         ano = request.args.get("ano", type=int)
-        return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano)))
+        nome_sess = session.get("nome", "")
+        # Gerente e admin veem tudo; outros filtram por head
+        gerentes = {"denise mussolin"}  # adicione outros gerentes aqui
+        head_filter = None if norm(nome_sess) in gerentes else nome_sess
+        return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano, head_filter=head_filter)))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
