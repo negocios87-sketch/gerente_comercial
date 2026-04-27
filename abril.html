@@ -258,6 +258,23 @@
     .col-sep { border-left: 1px solid var(--border) !important; }
 
 
+
+    /* ── FILTER ── */
+    .filter-group { display: flex; gap: 6px; align-items: center; }
+    .filter-group select {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 5px;
+      color: var(--white);
+      font-size: 12px;
+      padding: 5px 10px;
+      cursor: pointer;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .filter-group select:hover { border-color: var(--gold); }
+    .filter-group select option { background: #1A1A2E; color: white; }
+
     /* ── EXPAND ROWS ── */
     .row-squad { cursor: pointer; user-select: none; }
     .row-squad:hover { background: #F0F4FF !important; }
@@ -325,6 +342,26 @@
     <div class="periodo-badge" id="periodo-badge">Carregando...</div>
   </div>
   <div class="header-right">
+    <div class="filter-group">
+      <select id="sel-mes" onchange="fetchAbril()">
+        <option value="1">Janeiro</option>
+        <option value="2">Fevereiro</option>
+        <option value="3">Março</option>
+        <option value="4" selected>Abril</option>
+        <option value="5">Maio</option>
+        <option value="6">Junho</option>
+        <option value="7">Julho</option>
+        <option value="8">Agosto</option>
+        <option value="9">Setembro</option>
+        <option value="10">Outubro</option>
+        <option value="11">Novembro</option>
+        <option value="12">Dezembro</option>
+      </select>
+      <select id="sel-ano" onchange="fetchAbril()">
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+      </select>
+    </div>
     <span class="update-info" id="update-info"></span>
     <a href="/logout" class="btn-logout">Sair ({{ nome }})</a>
   </div>
@@ -332,7 +369,7 @@
 
 <!-- TABS -->
 <div class="tab-bar">
-  <div class="tab active" onclick="setTab('abril')">Abril 2026</div>
+  <div class="tab active" onclick="setTab('abril')" id="tab-abril">Abril 2026</div>
   <div class="tab" onclick="setTab('forecast')">Forecast Diário</div>
 </div>
 
@@ -581,8 +618,15 @@ function makeRow(row, cls = '', groupId = null) {
 function renderAbril(data) {
   const p = data.periodo;
 
+  const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   document.getElementById('periodo-badge').innerHTML =
-    `Abril ${p.ano} &nbsp;·&nbsp; <strong>${p.du_passados}</strong>/${p.du_total} dias úteis &nbsp;·&nbsp; <strong>${p.du_restantes}</strong> restantes`;
+    `${MESES[p.mes-1]} ${p.ano} &nbsp;·&nbsp; <strong>${p.du_passados}</strong>${p.du_total > 0 ? '/'+p.du_total : ''} dias úteis &nbsp;·&nbsp; <strong>${p.du_restantes}</strong> restantes`;
+  // Sync selectors with returned period
+  const selMes = document.getElementById('sel-mes');
+  const selAno = document.getElementById('sel-ano');
+  if (selMes) selMes.value = p.mes;
+  if (selAno) { if (![...selAno.options].find(o=>o.value==p.ano)) { const o=document.createElement('option'); o.value=p.ano; o.text=p.ano; selAno.appendChild(o); } selAno.value=p.ano; }
+  const tabEl = document.getElementById('tab-abril'); if(tabEl) tabEl.textContent = MESES[p.mes-1] + ' ' + p.ano;
   document.getElementById('update-info').textContent = `Atualizado: ${p.atualizado_em}`;
 
   const { squads, total, meta_120 } = data.closers;
@@ -648,11 +692,7 @@ function renderAbril(data) {
                 return html;
               }).join('')}
               ${makeRow(total, 'row-total')}
-              <tr class="row-meta120">
-                <td>Meta 120%</td>
-                <td>${R(meta_120)}</td>
-                <td colspan="15"></td>
-              </tr>
+
             </tbody>
           </table>
         </div>
@@ -665,7 +705,9 @@ function renderAbril(data) {
 // ── FETCH ─────────────────────────────────────────────────────
 async function fetchAbril() {
   try {
-    const res = await fetch('/api/abril');
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/abril?mes=${mes}&ano=${ano}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.erro) throw new Error(data.erro);
