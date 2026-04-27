@@ -304,6 +304,27 @@
     .row-sdr-group.open td:first-child::before { transform: rotate(90deg); }
 
 
+
+    /* ── HEAD CARD EXTRAS ── */
+    .head-card-equipe {
+      font-size: 10px; color: var(--gold); font-weight: 600;
+      letter-spacing: .5px; text-transform: uppercase;
+      margin-bottom: 12px; margin-top: -6px;
+    }
+    .head-progress-label { font-size: 10px; color: var(--text-muted); margin-top: 12px; margin-bottom: 4px; }
+    .head-progress-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+    .head-progress-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+    .head-progress-pct { font-size: 11px; font-weight: 700; color: var(--navy); margin-top: 4px; text-align: right; }
+
+    /* ── SDR BARS ── */
+    .sdr-bars-section { padding: 16px 20px; border-top: 1px solid var(--border); }
+    .sdr-bars-title { font-size: 11px; font-weight: 700; color: var(--navy); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+    .sdr-bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .sdr-bar-name { width: 160px; font-size: 12px; color: var(--text); flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sdr-bar-bg { flex: 1; height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+    .sdr-bar-fill { height: 100%; border-radius: 4px; transition: width .4s; }
+    .sdr-bar-pct { width: 48px; font-size: 11px; font-weight: 700; text-align: right; flex-shrink: 0; }
+
     /* ── HEAD RESULTS ── */
     .head-results { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
     .head-card {
@@ -464,6 +485,7 @@ function renderHeadResults(heads) {
         ${heads.map(h => `
           <div class="head-card">
             <div class="head-card-name">${h.nome}</div>
+            <div class="head-card-equipe">${h.equipes ? h.equipes.join(' · ') : ''}</div>
             <div class="head-card-row">
               <span class="head-card-label">Closers c/ Multi</span>
               <span>${pctBadge(h.ating_closer)}</span>
@@ -476,9 +498,28 @@ function renderHeadResults(heads) {
               <span>Total</span>
               <span>${pctBadge(h.total_final)}</span>
             </div>
+            <div class="head-progress-label">Atingimento Geral</div>
+            <div class="head-progress-bar">
+              <div class="head-progress-fill" style="width:${Math.min(h.total_final,100)}%;background:${h.total_final>=100?'#0D7A3E':h.total_final>=60?'#B8860B':'#B91C1C'}"></div>
+            </div>
+            <div class="head-progress-pct">${h.total_final.toFixed(1)}%</div>
           </div>`).join('')}
       </div>
-    </div>`;
+    </div>
+    <div class="sdr-bars-section">
+      <div class="sdr-bars-title">Atingimento Final por SDR</div>
+      <div class="sdr-bars">
+        ${body.map(s => `
+          <div class="sdr-bar-row">
+            <div class="sdr-bar-name">${s.nome}</div>
+            <div class="sdr-bar-bg">
+              <div class="sdr-bar-fill" style="width:${Math.min(s.pct_final,100)}%;background:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#B8860B':'#B91C1C'}"></div>
+            </div>
+            <div class="sdr-bar-pct ${s.pct_final>=100?'pct-green':s.pct_final>=60?'pct-amber':'pct-red'}">${s.pct_final.toFixed(1)}%</div>
+          </div>`).join('')}
+      </div>
+    </div>
+  `;
 }
 
 function buildMemberRow(row, groupId) {
@@ -644,7 +685,21 @@ function renderSdrs(sdrs) {
           </table>
         </div>
       </div>
-    </div>`;
+    </div>
+    <div class="sdr-bars-section">
+      <div class="sdr-bars-title">Atingimento Final por SDR</div>
+      <div class="sdr-bars">
+        ${body.map(s => `
+          <div class="sdr-bar-row">
+            <div class="sdr-bar-name">${s.nome}</div>
+            <div class="sdr-bar-bg">
+              <div class="sdr-bar-fill" style="width:${Math.min(s.pct_final,100)}%;background:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#B8860B':'#B91C1C'}"></div>
+            </div>
+            <div class="sdr-bar-pct ${s.pct_final>=100?'pct-green':s.pct_final>=60?'pct-amber':'pct-red'}">${s.pct_final.toFixed(1)}%</div>
+          </div>`).join('')}
+      </div>
+    </div>
+  `;
 }
 
 // ── RENDER ────────────────────────────────────────────────────
