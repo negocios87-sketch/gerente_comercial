@@ -506,19 +506,6 @@ function renderHeadResults(heads) {
           </div>`).join('')}
       </div>
     </div>
-    <div class="sdr-bars-section">
-      <div class="sdr-bars-title">Atingimento Final por SDR</div>
-      <div class="sdr-bars">
-        ${body.map(s => `
-          <div class="sdr-bar-row">
-            <div class="sdr-bar-name">${s.nome}</div>
-            <div class="sdr-bar-bg">
-              <div class="sdr-bar-fill" style="width:${Math.min(s.pct_final,100)}%;background:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#B8860B':'#B91C1C'}"></div>
-            </div>
-            <div class="sdr-bar-pct ${s.pct_final>=100?'pct-green':s.pct_final>=60?'pct-amber':'pct-red'}">${s.pct_final.toFixed(1)}%</div>
-          </div>`).join('')}
-      </div>
-    </div>
   `;
 }
 
