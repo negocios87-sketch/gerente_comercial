@@ -239,6 +239,7 @@ def calcular_abril():
     SQUADS_PERMITIDOS = {"sniper", "elite", "mgm"}
 
     squad_data = {}
+    squad_members = {}  # sub -> list of individual rows
     for m in closers_metas:
         nn  = m["nome_norm"]
         sub = nome_to_subarea.get(nn) or "Outros"
@@ -247,10 +248,15 @@ def calcular_abril():
         ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
         if sub not in squad_data:
             squad_data[sub] = {"nome": sub, "meta": 0, "realizado": 0, "realizado_multi": 0, "qtd": 0}
+            squad_members[sub] = []
         squad_data[sub]["meta"]            += m["meta_fin"]
         squad_data[sub]["realizado"]       += ri["valor"]
         squad_data[sub]["realizado_multi"] += ri["valor_multi"]
         squad_data[sub]["qtd"]             += ri["qtd"]
+        squad_members[sub].append({
+            "nome": m["nome"], "meta": m["meta_fin"],
+            "realizado": ri["valor"], "realizado_multi": ri["valor_multi"], "qtd": ri["qtd"],
+        })
 
     def build_row(nome, meta, real, real_multi, qtd):
         mtd = safe_div(meta, du_total) * du_pass if du_total else 0
@@ -271,8 +277,15 @@ def calcular_abril():
             "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
         }
 
-    squads = [build_row(sd["nome"], sd["meta"], sd["realizado"], sd["realizado_multi"], sd["qtd"])
-              for sd in squad_data.values()]
+    squads = []
+    for sub, sd in squad_data.items():
+        row = build_row(sd["nome"], sd["meta"], sd["realizado"], sd["realizado_multi"], sd["qtd"])
+        members = []
+        for p in squad_members.get(sub, []):
+            mr = build_row(p["nome"], p["meta"], p["realizado"], p["realizado_multi"], p["qtd"])
+            members.append(mr)
+        row["members"] = members
+        squads.append(row)
 
     t_meta  = sum(sd["meta"]            for sd in squad_data.values())
     t_real  = sum(sd["realizado"]       for sd in squad_data.values())
@@ -307,7 +320,7 @@ def calcular_abril():
     for m in sdrs_metas:
         nn       = m["nome_norm"]
         meta_reu = m["meta_reu"]
-        meta_fin = m["meta_fin"] / 10  # mesmo ajuste dos closers
+        meta_fin = m["meta_fin"]
 
         uid     = nome_norm_to_uid.get(nn)
         uid_str = str(uid) if uid else ""
@@ -329,8 +342,10 @@ def calcular_abril():
         ticket      = arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0
         pct_final   = arred((pct_reu + pct_ganhos) / 2)
 
+        sub_sdr = nome_to_subarea.get(nn, "")
         sdrs.append({
             "nome":               m["nome"],
+            "subarea":            sub_sdr,
             "meta_reuniao":       meta_reu,
             "meta_diaria":        arred(safe_div(meta_reu, du_total)),
             "validadas":          qtd_validadas,
@@ -373,7 +388,7 @@ def calcular_abril():
         "periodo": {
             "mes": mes, "ano": ano,
             "du_total": du_total, "du_passados": du_pass, "du_restantes": du_rest,
-            "atualizado_em": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "atualizado_em": (datetime.now() - __import__("datetime").timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
         },
         "closers": {
             "squads": squads,
