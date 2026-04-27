@@ -284,6 +284,8 @@ def calcular_abril():
         for p in squad_members.get(sub, []):
             mr = build_row(p["nome"], p["meta"], p["realizado"], p["realizado_multi"], p["qtd"])
             members.append(mr)
+        if row["nome"].upper() == "MGM":
+            row["nome"] = "Olympus"
         row["members"] = members
         squads.append(row)
 
@@ -314,7 +316,12 @@ def calcular_abril():
         oid = str(act.get("owner_id", ""))
         acts_by_owner.setdefault(oid, []).append(act)
 
-    sdrs_metas = [m for m in metas if m["meta_reu"] > 0 and m["meta_fin"] > 0]
+    SDRS_SQUADS = {"sniper", "elite", "mgm"}
+    sdrs_metas = [
+        m for m in metas
+        if m["meta_reu"] > 0 and m["meta_fin"] > 0
+        and norm(nome_to_subarea.get(m["nome_norm"], "")) in SDRS_SQUADS
+    ]
 
     sdrs = []
     for m in sdrs_metas:
