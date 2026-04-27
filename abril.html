@@ -279,22 +279,22 @@
     .row-squad { cursor: pointer; user-select: none; }
     .row-squad:hover { background: #F0F4FF !important; }
     .row-squad td:first-child::before {
-      content: '▶';
+      content: '▼';
       display: inline-block;
       font-size: 9px;
       color: var(--gold);
       margin-right: 8px;
       transition: transform .2s;
     }
-    .row-squad.open td:first-child::before { transform: rotate(90deg); }
-    .row-member { display: none; background: #FAFBFF !important; }
-    .row-member.visible { display: table-row; }
+    .row-squad.open td:first-child::before { transform: rotate(0deg); }
+    .row-member { display: table-row; background: #FAFBFF !important; }
+    .row-member.visible { display: table-row; } /* always visible by default */
     .row-member td:first-child { padding-left: 44px; font-weight: 400; color: var(--text-muted); }
     .row-member td { font-size: 11px; }
     .row-sdr-group { cursor: pointer; user-select: none; }
     .row-sdr-group:hover { background: #F0F4FF !important; }
     .row-sdr-group td:first-child::before {
-      content: '▶';
+      content: '▼';
       display: inline-block;
       font-size: 9px;
       color: var(--gold);
@@ -307,11 +307,11 @@
 
     /* ── HEAD CARD EXTRAS ── */
     .head-card-equipe {
-      font-size: 10px; color: var(--gold); font-weight: 600;
+      font-size: 9px; color: var(--gold); font-weight: 600;
       letter-spacing: .5px; text-transform: uppercase;
-      margin-bottom: 12px; margin-top: -6px;
+      margin-bottom: 8px; margin-top: 0;
     }
-    .head-progress-label { font-size: 10px; color: var(--text-muted); margin-top: 12px; margin-bottom: 4px; }
+    .head-progress-label { font-size: 10px; color: var(--text-muted); margin-top: 8px; margin-bottom: 3px; }
     .head-progress-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
     .head-progress-fill { height: 100%; border-radius: 3px; transition: width .4s; }
     .head-progress-pct { font-size: 11px; font-weight: 700; color: var(--navy); margin-top: 4px; text-align: right; }
@@ -331,20 +331,20 @@
       background: var(--white);
       border: 1px solid var(--border);
       border-left: 3px solid var(--gold);
-      border-radius: 8px;
-      padding: 16px 20px;
-      min-width: 220px;
-      flex: 1 1 220px;
+      border-radius: 6px;
+      padding: 10px 14px;
+      min-width: 160px;
+      flex: 1 1 160px;
       box-shadow: var(--shadow);
     }
-    .head-card-name { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 12px; }
-    .head-card-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; }
+    .head-card-name { font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+    .head-card-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; font-size: 11px; }
     .head-card-label { color: var(--text-muted); }
-    .head-card-total { 
-      margin-top: 10px; padding-top: 10px; 
+    .head-card-total {
+      margin-top: 6px; padding-top: 6px;
       border-top: 1px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
-      font-size: 13px; font-weight: 700;
+      font-size: 12px; font-weight: 700;
     }
     .badge-lider {
       font-size: 9px; font-weight: 700; letter-spacing: .5px;
@@ -543,14 +543,24 @@ function toggleGroup(groupId) {
   const squadRow = document.querySelector(`[data-group="${groupId}"]`);
   const memberRows = document.querySelectorAll(`[data-member="${groupId}"]`);
   const isOpen = squadRow.classList.toggle('open');
-  memberRows.forEach(r => r.classList.toggle('visible', isOpen));
+  memberRows.forEach(r => {
+    r.style.display = isOpen ? 'table-row' : 'none';
+  });
 }
 
 function toggleSdrGroup(groupId) {
   const groupRow = document.querySelector(`[data-sdr-group="${groupId}"]`);
   const memberRows = document.querySelectorAll(`[data-sdr-member="${groupId}"]`);
   const isOpen = groupRow.classList.toggle('open');
-  memberRows.forEach(r => r.classList.toggle('visible', isOpen));
+  memberRows.forEach(r => {
+    r.style.display = isOpen ? 'table-row' : 'none';
+  });
+}
+
+// Open all groups on load
+function openAllGroups() {
+  document.querySelectorAll('[data-group]').forEach(r => r.classList.add('open'));
+  document.querySelectorAll('[data-sdr-group]').forEach(r => r.classList.add('open'));
 }
 
 // ── MODO SEM/COM MULTIPLICADOR ────────────────────────────────
@@ -673,18 +683,7 @@ function renderSdrs(sdrs) {
         </div>
       </div>
     </div>
-    <div style="padding:14px 20px 16px;border-top:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Atingimento Individual por SDR</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px 20px">
-        ${body.map(s => `<div style="display:flex;align-items:center;gap:8px;min-width:220px;flex:1 1 220px;padding:4px 0">
-          <span style="font-size:12px;color:var(--text);min-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.nome}</span>
-          <div style="flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden">
-            <div style="height:100%;border-radius:3px;width:${Math.min(s.pct_final,100)}%;background:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#B8860B':'#B91C1C'}"></div>
-          </div>
-          <span style="font-size:11px;font-weight:700;min-width:42px;text-align:right;color:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#92400E':'#B91C1C'}">${s.pct_final.toFixed(1)}%</span>
-        </div>`).join('')}
-      </div>
-    </div>
+
   `;
 }
 
@@ -816,6 +815,7 @@ async function fetchAbril() {
     const data = await res.json();
     if (data.erro) throw new Error(data.erro);
     renderAbril(data);
+    setTimeout(openAllGroups, 50);
   } catch(e) {
     document.getElementById('abril-content').innerHTML =
       `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
