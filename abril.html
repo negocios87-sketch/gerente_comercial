@@ -673,17 +673,16 @@ function renderSdrs(sdrs) {
         </div>
       </div>
     </div>
-    <div class="sdr-bars-section">
-      <div class="sdr-bars-title">Atingimento Final por SDR</div>
-      <div class="sdr-bars">
-        ${body.map(s => `
-          <div class="sdr-bar-row">
-            <div class="sdr-bar-name">${s.nome}</div>
-            <div class="sdr-bar-bg">
-              <div class="sdr-bar-fill" style="width:${Math.min(s.pct_final,100)}%;background:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#B8860B':'#B91C1C'}"></div>
-            </div>
-            <div class="sdr-bar-pct ${s.pct_final>=100?'pct-green':s.pct_final>=60?'pct-amber':'pct-red'}">${s.pct_final.toFixed(1)}%</div>
-          </div>`).join('')}
+    <div style="padding:14px 20px 16px;border-top:1px solid var(--border)">
+      <div style="font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Atingimento Individual por SDR</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 20px">
+        ${body.map(s => `<div style="display:flex;align-items:center;gap:8px;min-width:220px;flex:1 1 220px;padding:4px 0">
+          <span style="font-size:12px;color:var(--text);min-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.nome}</span>
+          <div style="flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden">
+            <div style="height:100%;border-radius:3px;width:${Math.min(s.pct_final,100)}%;background:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#B8860B':'#B91C1C'}"></div>
+          </div>
+          <span style="font-size:11px;font-weight:700;min-width:42px;text-align:right;color:${s.pct_final>=100?'#0D7A3E':s.pct_final>=60?'#92400E':'#B91C1C'}">${s.pct_final.toFixed(1)}%</span>
+        </div>`).join('')}
       </div>
     </div>
   `;
@@ -802,8 +801,8 @@ function renderAbril(data) {
         </div>
       </div>
     </div>
-    ${data.head_results && data.head_results.length ? renderHeadResults(data.head_results) : ''}
-  ${data.sdrs && data.sdrs.length ? renderSdrs(data.sdrs) : ''}
+    ${data.sdrs && data.sdrs.length ? renderSdrs(data.sdrs) : ''}
+  ${data.head_results && data.head_results.length ? renderHeadResults(data.head_results) : ''}
   `;
 }
 
