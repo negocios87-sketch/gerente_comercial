@@ -257,6 +257,35 @@
     /* Separador de grupos */
     .col-sep { border-left: 1px solid var(--border) !important; }
 
+
+    /* ── EXPAND ROWS ── */
+    .row-squad { cursor: pointer; user-select: none; }
+    .row-squad:hover { background: #F0F4FF !important; }
+    .row-squad td:first-child::before {
+      content: '▶';
+      display: inline-block;
+      font-size: 9px;
+      color: var(--gold);
+      margin-right: 8px;
+      transition: transform .2s;
+    }
+    .row-squad.open td:first-child::before { transform: rotate(90deg); }
+    .row-member { display: none; background: #FAFBFF !important; }
+    .row-member.visible { display: table-row; }
+    .row-member td:first-child { padding-left: 44px; font-weight: 400; color: var(--text-muted); }
+    .row-member td { font-size: 11px; }
+    .row-sdr-group { cursor: pointer; user-select: none; }
+    .row-sdr-group:hover { background: #F0F4FF !important; }
+    .row-sdr-group td:first-child::before {
+      content: '▶';
+      display: inline-block;
+      font-size: 9px;
+      color: var(--gold);
+      margin-right: 8px;
+      transition: transform .2s;
+    }
+    .row-sdr-group.open td:first-child::before { transform: rotate(90deg); }
+
     /* ── LOADING ── */
     .loading-state {
       display: flex;
@@ -357,6 +386,46 @@ function deficitVal(v) {
   return `<span class="deficit">${R(v)}</span>`;
 }
 
+
+function buildMemberRow(row, groupId) {
+  const pSem = row.pct_atingido ?? 0;
+  const pCom = row.pct_atingido_multi ?? 0;
+  return `
+    <tr class="row-member" data-member="${groupId}">
+      <td>${row.nome}</td>
+      <td>${R(row.meta)}</td>
+      <td>—</td>
+      <td>—</td>
+      <td class="col-sem">${R(row.realizado)}</td>
+      <td class="col-sem">${pctBadge(pSem)}</td>
+      <td class="col-sem">—</td>
+      <td class="col-sem">—</td>
+      <td class="col-sem">—</td>
+      <td class="col-sem">${R(row.deficit_meta ?? (row.meta - row.realizado))}</td>
+      <td class="col-sem">—</td>
+      <td class="col-com col-sep" style="display:none">${R(row.realizado_multi)}</td>
+      <td class="col-com" style="display:none">${pctBadge(pCom)}</td>
+      <td class="col-com" style="display:none">—</td>
+      <td class="col-com" style="display:none">—</td>
+      <td class="col-sep">${N(row.qtd_ganhos)}</td>
+      <td>${R(row.ticket_medio)}</td>
+    </tr>`;
+}
+
+function toggleGroup(groupId) {
+  const squadRow = document.querySelector(`[data-group="${groupId}"]`);
+  const memberRows = document.querySelectorAll(`[data-member="${groupId}"]`);
+  const isOpen = squadRow.classList.toggle('open');
+  memberRows.forEach(r => r.classList.toggle('visible', isOpen));
+}
+
+function toggleSdrGroup(groupId) {
+  const groupRow = document.querySelector(`[data-sdr-group="${groupId}"]`);
+  const memberRows = document.querySelectorAll(`[data-sdr-member="${groupId}"]`);
+  const isOpen = groupRow.classList.toggle('open');
+  memberRows.forEach(r => r.classList.toggle('visible', isOpen));
+}
+
 // ── MODO SEM/COM MULTIPLICADOR ────────────────────────────────
 let modoMulti = false;
 function setModo(multi) {
@@ -421,7 +490,56 @@ function renderSdrs(sdrs) {
               </tr>
             </thead>
             <tbody>
-              ${body.map(s => makeSdrRow(s)).join('')}
+              ${(() => {
+      // Group SDRs by subarea
+      const groups = {};
+      body.forEach(s => {
+        const sub = s.subarea || 'Outros';
+        if (!groups[sub]) groups[sub] = [];
+        groups[sub].push(s);
+      });
+      let html = '';
+      Object.entries(groups).forEach(([sub, members], gi) => {
+        const gid = 'sdr_' + gi;
+        // Aggregate group
+        const tReu   = members.reduce((a,s) => a + s.meta_reuniao, 0);
+        const tValid = members.reduce((a,s) => a + s.validadas, 0);
+        const tDev   = members.reduce((a,s) => a + s.deveria_estar, 0);
+        const tFalt  = members.reduce((a,s) => a + s.faltam, 0);
+        const tGanho = members.reduce((a,s) => a + s.valor_ganho, 0);
+        const tMulti = members.reduce((a,s) => a + s.valor_ganho_multi, 0);
+        const tMeta  = members.reduce((a,s) => a + s.meta_ganho, 0);
+        const tQtd   = members.reduce((a,s) => a + s.qtd_ganhos, 0);
+        const pReu   = tReu ? (tValid/tReu*100) : 0;
+        const pGan   = tMeta ? (tMulti/tMeta*100) : 0;
+        const pFin   = (pReu + pGan) / 2;
+        const grp = { nome: sub, meta_reuniao: tReu,
+          meta_diaria: tReu/20, validadas: tValid, deveria_estar: tDev,
+          faltam: tFalt, pct_reu: pReu, meta_ganho: tMeta, qtd_ganhos: tQtd,
+          valor_ganho: tGanho, valor_ganho_multi: tMulti,
+          pct_ganhos: pGan, ticket_medio: tQtd ? tGanho/tQtd : 0, pct_final: pFin };
+        html += `<tr class="row-sdr-group" data-sdr-group="${gid}" onclick="toggleSdrGroup('${gid}')">
+          <td>${sub}</td>
+          <td>${N(grp.meta_reuniao)}</td>
+          <td>${grp.meta_diaria.toFixed(1)}</td>
+          <td>${N(grp.validadas)}</td>
+          <td>${grp.deveria_estar.toFixed(0)}</td>
+          <td>${grp.faltam <= 0 ? '<span class="surplus">'+N(Math.abs(grp.faltam))+'</span>' : '<span class="deficit">'+N(grp.faltam)+'</span>'}</td>
+          <td>${pctBadge(grp.pct_reu)}</td>
+          <td>${R(grp.meta_ganho)}</td>
+          <td>${N(grp.qtd_ganhos)}</td>
+          <td>${R(grp.valor_ganho)}</td>
+          <td class="val-multi">${R(grp.valor_ganho_multi)}</td>
+          <td>${pctBadge(grp.pct_ganhos)}</td>
+          <td>${R(grp.ticket_medio)}</td>
+          <td>${pctBadge(grp.pct_final)}</td>
+        </tr>`;
+        members.forEach(s => {
+          html += `<tr class="row-member" data-sdr-member="${gid}">` + makeSdrRow(s, '').replace('<tr class="">', '').replace('</tr>','') + '</tr>';
+        });
+      });
+      return html;
+    })()}
               ${total ? makeSdrRow(total, 'row-total') : ''}
             </tbody>
           </table>
@@ -431,9 +549,12 @@ function renderSdrs(sdrs) {
 }
 
 // ── RENDER ────────────────────────────────────────────────────
-function makeRow(row, cls = '') {
+function makeRow(row, cls = '', groupId = null) {
+  const isSquad = groupId !== null && cls !== 'row-total' && cls !== 'row-meta120';
+  const squadCls = isSquad ? `row-squad ${cls}` : cls;
+  const dataAttr = isSquad ? `data-group="${groupId}" onclick="toggleGroup('${groupId}')"` : '';
   return `
-    <tr class="${cls}">
+    <tr class="${squadCls}" ${dataAttr}>
       <td>${row.nome}</td>
       <td>${R(row.meta)}</td>
       <td>${N(row.dias_uteis)}</td>
@@ -515,7 +636,17 @@ function renderAbril(data) {
               </tr>
             </thead>
             <tbody>
-              ${squads.map(r => makeRow(r)).join('')}
+              ${squads.map((r, i) => {
+                const gid = 'squad_' + i;
+                let html = makeRow(r, '', gid);
+                if (r.members) {
+                  r.members.forEach(m => {
+                    const mr = buildMemberRow(m, gid);
+                    html += mr;
+                  });
+                }
+                return html;
+              }).join('')}
               ${makeRow(total, 'row-total')}
               <tr class="row-meta120">
                 <td>Meta 120%</td>
