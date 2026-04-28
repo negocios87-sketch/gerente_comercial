@@ -320,7 +320,7 @@ function renderClosers(closers, total, squadIdx) {
 
 // ── SDR TABLE ─────────────────────────────────────────────────
 function sdrRow(s, isMember, gid) {
-  const cls = isMember ? `row-member" data-mid="${gid}` : `row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')`;
+  const cls = isMember ? `row-member" data-mid="${gid}` : ``;
   const nameCell = `<div class="name-cell">${avatarHtml(s.nome)}<span>${s.nome}</span></div>`;
   return `<tr class="${cls}">
     <td>${nameCell}</td>
