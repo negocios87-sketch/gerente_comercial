@@ -530,13 +530,37 @@ const FOTO_BASE = "https://raw.githubusercontent.com/negocios87-sketch/fotos_tim
 
 function avatarHtml(nome, size=32) {
   const initials = nome.split(' ').slice(0,2).map(p=>p[0]?.toUpperCase()||'').join('');
-  // Try jpg, fallback to initials via onerror
-  return `<img class="avatar" src="${FOTO_BASE}${encodeURIComponent(nome)}.jpg"
+  const base = FOTO_BASE + encodeURIComponent(nome);
+  // Try jpg -> jpeg -> png -> initials
+  return `<img class="avatar" src="${base}.jpg"
     style="width:${size}px;height:${size}px"
-    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
-    alt="${nome}">
-    <div class="avatar-initials" style="width:${size}px;height:${size}px;display:none">${initials}</div>`;
+    onerror="this.src='${base}.jpeg'"
+    onload="this.onerror=null"
+    data-fallback-jpeg="${base}.jpeg"
+    data-fallback-png="${base}.png"
+    alt="${nome}"
+    id="av_${nome.replace(/[^a-z]/gi,'_')}">
+    <div class="avatar-initials" style="width:${size}px;height:${size}px;display:none" id="avinit_${nome.replace(/[^a-z]/gi,'_')}">${initials}</div>`;
 }
+
+// Multi-extension fallback
+document.addEventListener('error', function(e) {
+  const img = e.target;
+  if (!img.classList || !img.classList.contains('avatar')) return;
+  const src = img.src;
+  const base = src.replace(/\.(jpg|jpeg|png)$/i, '');
+  if (src.endsWith('.jpg') || src.endsWith('.JPG')) {
+    img.src = base + '.jpeg';
+  } else if (src.endsWith('.jpeg') || src.endsWith('.JPEG')) {
+    img.src = base + '.png';
+  } else if (src.endsWith('.png') || src.endsWith('.PNG')) {
+    img.src = base + '.jpg'.toUpperCase();
+  } else {
+    img.style.display = 'none';
+    const initEl = img.nextElementSibling;
+    if (initEl) initEl.style.display = 'flex';
+  }
+}, true);
 
 function buildMemberRow(row, groupId) {
   const pSem = row.pct_atingido ?? 0;
@@ -702,13 +726,13 @@ function renderSdrs(sdrs) {
           <td>${pctBadge(grp.pct_final)}</td>
         </tr>`;
         members.forEach(s => {
+          const sdrAvatar = avatarHtml(s.nome);
           const sdrMemberRow = makeSdrRow(s, '');
-          // inject avatar into first td
           const sdrWithAvatar = sdrMemberRow.replace(
             /(<tr[^>]*>\s*<td[^>]*>)([^<]+)(<\/td>)/,
-            `$1<div class="member-name-cell">${'${avatarHtml(s.nome)}'}$2</div>$3`
+            '$1<div class="member-name-cell">' + sdrAvatar + '$2</div>$3'
           );
-          html += `<tr class="row-member" data-sdr-member="${gid}">` + sdrWithAvatar.replace(/<tr[^>]*>/, '').replace('</tr>','') + '</tr>';
+          html += '<tr class="row-member" data-sdr-member="' + gid + '">' + sdrWithAvatar.replace(/<tr[^>]*>/, '').replace('</tr>','') + '</tr>';
         });
       });
       return html;
