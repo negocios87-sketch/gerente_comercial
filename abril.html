@@ -294,13 +294,12 @@ function closerRow(r, gid, isMember) {
 
 function renderClosers(closers, total, squadIdx) {
   if (!closers || !closers.length) return '';
-  let tbody = '';
+  const gid = `cg_${squadIdx}`;
+  let memberRows = '';
   closers.forEach((r, i) => {
-    const gid = `c_${squadIdx}_${i}`;
-    tbody += closerRow(r, gid, false);
-    // No expand needed for individual closers — they ARE the members
+    memberRows += closerRow(r, gid, true);
   });
-  if (total) tbody += `<tr class="row-total">
+  const totalRow = total ? `<tr class="row-total">
     <td>TOTAL</td><td>${R(total.meta)}</td><td>${N(total.dias_uteis)}</td><td>${R(total.meta_du)}</td>
     <td class="col-sem">${R(total.realizado)}</td><td class="col-sem">${pctBadge(total.pct_atingido)}</td>
     <td class="col-sem">${R(total.mtd)}</td><td class="col-sem">${defVal(total.deficit_mtd)}</td>
@@ -311,10 +310,24 @@ function renderClosers(closers, total, squadIdx) {
     <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
     <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
     <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td>
-  </tr>`;
+  </tr>` : '';
+  // Group header row (collapsible)
+  const groupRow = total ? `<tr class="row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')">
+    <td colspan="4">Closers (${closers.length})</td>
+    <td class="col-sem val-real">${R(total.realizado)}</td><td class="col-sem">${pctBadge(total.pct_atingido)}</td>
+    <td class="col-sem">${R(total.mtd)}</td><td class="col-sem">${defVal(total.deficit_mtd)}</td>
+    <td class="col-sem">${pctBadge(total.pct_mtd)}</td><td class="col-sem">${defVal(total.deficit_meta)}</td>
+    <td class="col-sem">${R(total.meta_dia_100)}</td>
+    <td class="col-com val-multi" style="display:none">${R(total.realizado_multi)}</td>
+    <td class="col-com" style="display:none">${pctBadge(total.pct_atingido_multi)}</td>
+    <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
+    <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
+    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td>
+  </tr>` : '';
   return `<div class="section">
-    <div class="section-label">Closers</div>
-    <div class="card"><div class="table-scroll"><table>${closerHeaders()}<tbody>${tbody}</tbody></table></div></div>
+    <div class="card"><div class="table-scroll"><table>${closerHeaders()}<tbody>
+      ${groupRow}${memberRows}
+    </tbody></table></div></div>
   </div>`;
 }
 
@@ -337,26 +350,28 @@ function sdrRow(s, isMember, gid) {
 
 function renderSdrs(sdrs, total, squadIdx) {
   if (!sdrs || !sdrs.length) return '';
-  let tbody = sdrs.map((s,i) => sdrRow(s, false, `s_${squadIdx}_${i}`)).join('');
-  if (total) tbody += `<tr class="row-total">
-    <td>TOTAL</td><td>${N(total.meta_reuniao)}</td><td>${total.meta_diaria.toFixed(1)}</td>
+  const gid = `sg_${squadIdx}`;
+  let memberRows = sdrs.map((s,i) => sdrRow(s, true, gid)).join('');
+  const sdrHeaders = `<thead><tr>
+    <th style="text-align:left">SDR</th><th>Meta Reu.</th><th>Meta/Dia</th>
+    <th>Validadas</th><th>Deveria Estar</th><th>Faltam</th><th>% Reu.</th>
+    <th>Meta Ganho</th><th>Qtd</th><th>R$ Ganho</th><th>R$ c/Multi</th>
+    <th>% Ganhos</th><th>Ticket</th><th>% Final</th>
+  </tr></thead>`;
+  const groupRow = total ? `<tr class="row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')">
+    <td>SDR's (${sdrs.length})</td>
+    <td>${N(total.meta_reuniao)}</td><td>${total.meta_diaria.toFixed(1)}</td>
     <td>${N(total.validadas)}</td><td>${total.deveria_estar.toFixed(0)}</td>
-    <td>${defVal(total.faltam)}</td><td>${pctBadge(total.pct_reu)}</td>
+    <td>${total.faltam<=0?'<span class="surplus">'+N(Math.abs(total.faltam))+'</span>':'<span class="deficit">'+N(total.faltam)+'</span>'}</td>
+    <td>${pctBadge(total.pct_reu)}</td>
     <td>${R(total.meta_ganho)}</td><td>${N(total.qtd_ganhos)}</td>
     <td>${R(total.valor_ganho)}</td><td class="val-multi">${R(total.valor_ganho_multi)}</td>
     <td>${pctBadge(total.pct_ganhos)}</td><td>${R(total.ticket_medio)}</td>
     <td>${pctBadge(total.pct_final)}</td>
-  </tr>`;
+  </tr>` : '';
   return `<div class="section">
-    <div class="section-label">SDR's</div>
     <div class="card"><div class="table-scroll"><table>
-      <thead><tr>
-        <th style="text-align:left">SDR</th><th>Meta Reu.</th><th>Meta/Dia</th>
-        <th>Validadas</th><th>Deveria Estar</th><th>Faltam</th><th>% Reu.</th>
-        <th>Meta Ganho</th><th>Qtd</th><th>R$ Ganho</th><th>R$ c/Multi</th>
-        <th>% Ganhos</th><th>Ticket</th><th>% Final</th>
-      </tr></thead>
-      <tbody>${tbody}</tbody>
+      ${sdrHeaders}<tbody>${groupRow}${memberRows}</tbody>
     </table></div></div>
   </div>`;
 }
