@@ -275,6 +275,22 @@
     .filter-group select:hover { border-color: var(--gold); }
     .filter-group select option { background: #1A1A2E; color: white; }
 
+
+    /* ── AVATARS ── */
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      object-fit: cover; border: 2px solid var(--gold);
+      flex-shrink: 0; background: var(--bg);
+    }
+    .avatar-initials {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--navy); border: 2px solid var(--gold);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--gold); font-size: 10px; font-weight: 700;
+      flex-shrink: 0;
+    }
+    .member-name-cell { display: flex; align-items: center; gap: 8px; }
+
     /* ── EXPAND ROWS ── */
     .row-squad { cursor: pointer; user-select: none; }
     .row-squad:hover { background: #F0F4FF !important; }
@@ -509,17 +525,31 @@ function renderHeadResults(heads) {
   `;
 }
 
+
+const FOTO_BASE = "https://raw.githubusercontent.com/negocios87-sketch/fotos_time_comercial/main/";
+
+function avatarHtml(nome, size=32) {
+  const initials = nome.split(' ').slice(0,2).map(p=>p[0]?.toUpperCase()||'').join('');
+  // Try jpg, fallback to initials via onerror
+  return `<img class="avatar" src="${FOTO_BASE}${encodeURIComponent(nome)}.jpg"
+    style="width:${size}px;height:${size}px"
+    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+    alt="${nome}">
+    <div class="avatar-initials" style="width:${size}px;height:${size}px;display:none">${initials}</div>`;
+}
+
 function buildMemberRow(row, groupId) {
   const pSem = row.pct_atingido ?? 0;
   const pCom = row.pct_atingido_multi ?? 0;
   const isHead = row.is_head;
   const nomeLbl = isHead ? `${row.nome} <span class="badge-lider">LÍDER</span>` : row.nome;
+  const avatarCell = `<div class="member-name-cell">${avatarHtml(row.nome)}${nomeLbl}</div>`;
   const metaVal = row.meta > 0 ? R(row.meta) : '—';
   const pctSemVal = row.meta > 0 ? pctBadge(pSem) : '—';
   const pctComVal = row.meta > 0 ? pctBadge(pCom) : '—';
   return `
     <tr class="row-member" data-member="${groupId}">
-      <td>${nomeLbl}</td>
+      <td>${avatarCell}</td>
       <td>${metaVal}</td>
       <td>${row.meta > 0 ? N(row.dias_uteis) : '—'}</td>
       <td>${row.meta > 0 ? R(row.meta_du) : '—'}</td>
@@ -672,7 +702,13 @@ function renderSdrs(sdrs) {
           <td>${pctBadge(grp.pct_final)}</td>
         </tr>`;
         members.forEach(s => {
-          html += `<tr class="row-member" data-sdr-member="${gid}">` + makeSdrRow(s, '').replace('<tr class="">', '').replace('</tr>','') + '</tr>';
+          const sdrMemberRow = makeSdrRow(s, '');
+          // inject avatar into first td
+          const sdrWithAvatar = sdrMemberRow.replace(
+            /(<tr[^>]*>\s*<td[^>]*>)([^<]+)(<\/td>)/,
+            `$1<div class="member-name-cell">${'${avatarHtml(s.nome)}'}$2</div>$3`
+          );
+          html += `<tr class="row-member" data-sdr-member="${gid}">` + sdrWithAvatar.replace(/<tr[^>]*>/, '').replace('</tr>','') + '</tr>';
         });
       });
       return html;
