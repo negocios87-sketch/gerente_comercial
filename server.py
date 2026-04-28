@@ -278,18 +278,17 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     du_sheet = next((m["dias_uteis"] for m in closers_metas if m["dias_uteis"] > 0), 0)
     du_total = du_sheet if du_sheet > 0 else du_calc
 
-    SQUADS_PERMITIDOS = {"sniper", "elite", "mgm"}
+    SQUADS_PERMITIDOS = None  # None = todos os squads
     if head_filter:
         head_squads = get_head_squads(head_filter, colab_df)
-        # intersect with allowed
-        SQUADS_PERMITIDOS = {s for s in head_squads if s in SQUADS_PERMITIDOS} or SQUADS_PERMITIDOS
+        SQUADS_PERMITIDOS = head_squads if head_squads else None
 
     squad_data = {}
     squad_members = {}  # sub -> list of individual rows
     for m in closers_metas:
         nn  = m["nome_norm"]
         sub = nome_to_subarea.get(nn) or "Outros"
-        if norm(sub) not in SQUADS_PERMITIDOS:
+        if SQUADS_PERMITIDOS is not None and norm(sub) not in SQUADS_PERMITIDOS:
             continue
         ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
         if sub not in squad_data:
@@ -388,14 +387,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         oid = str(act.get("owner_id", ""))
         acts_by_owner.setdefault(oid, []).append(act)
 
-    SDRS_SQUADS = {"sniper", "elite", "mgm"}
+    SDRS_SQUADS = None  # None = todos os squads
     if head_filter:
         head_squads_sdr = get_head_squads(head_filter, colab_df)
-        SDRS_SQUADS = {s for s in head_squads_sdr if s in SDRS_SQUADS} or SDRS_SQUADS
+        SDRS_SQUADS = head_squads_sdr if head_squads_sdr else None
     sdrs_metas = [
         m for m in metas
         if m["meta_reu"] > 0 and m["meta_fin"] > 0
-        and norm(nome_to_subarea.get(m["nome_norm"], "")) in SDRS_SQUADS
+        and (SDRS_SQUADS is None or norm(nome_to_subarea.get(m["nome_norm"], "")) in SDRS_SQUADS)
     ]
 
     sdrs = []
