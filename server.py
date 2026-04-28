@@ -152,7 +152,7 @@ def buscar_metas_todas(ano, mes):
         if a != ano or m != mes: continue
         nome_raw = str(row[col_nome]).strip() if col_nome else ""
         meta_reu = to_num(row[col_reu]) if col_reu else 0.0
-        meta_fin = to_num(row[col_fin]) if col_fin else 0.0
+        meta_fin = (to_num(row[col_fin]) if col_fin else 0.0) / 10
         dias_ut  = 0
         if col_du:
             try: dias_ut = int(float(str(row[col_du] or 0)))
@@ -362,7 +362,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         sub = nome_to_subarea.get(nn, "")
         if not sub or not visivel(sub): continue
         meta_reu = m["meta_reu"] / 10
-        meta_fin = m["meta_fin"] / 10
+        meta_fin = m["meta_fin"]
         uid      = nome_norm_to_uid.get(nn)
         uid_str  = str(uid) if uid else ""
         acts_sdr = acts_by_owner.get(uid_str, [])
