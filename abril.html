@@ -793,17 +793,7 @@ function renderAbril(data) {
 
   const { squads, total, meta_120 } = data.closers;
 
-  // Aviso de debug se não tiver squads
-  const debugAviso = squads.length === 0 ? `
-    <div style="background:#FEF9C3;border:1px solid #FDE047;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#713F12">
-      <strong>Atenção:</strong> Nenhum closer encontrado nas metas.
-      Acesse <a href="/api/debug/metas" target="_blank" style="color:#92400E"><strong>/api/debug/metas</strong></a>
-      e me mostre o resultado para ajustar os dados.
-      ${data._debug ? `<br>Total de linhas lidas: ${data._debug.total_metas} | Closers: ${data._debug.closers_encontrados}` : ''}
-    </div>` : '';
-
   document.getElementById('abril-content').innerHTML = `
-    ${debugAviso}
     <div class="section">
       <div class="section-header">
         <div class="section-title">Performance por Squad — Closers</div>
