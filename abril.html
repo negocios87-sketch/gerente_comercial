@@ -113,6 +113,13 @@
     .rc-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px; }
     .rc-label { color: var(--text-muted); }
     .rc-total { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700; }
+
+    .result-card-consolidated {
+      border-left: 3px solid var(--navy);
+      background: #F8F9FF;
+    }
+    .result-card-consolidated .rc-nome { color: var(--navy); }
+
     .rc-bar { height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 8px; }
     .rc-fill { height: 100%; border-radius: 3px; }
 
@@ -380,8 +387,8 @@ function renderSdrs(sdrs, total, squadIdx) {
 function renderResultados(resultados) {
   if (!resultados || !resultados.length) return '';
   const cards = resultados.map(r => `
-    <div class="result-card">
-      <div class="rc-nome">${r.nome}</div>
+    <div class="result-card${r.is_consolidated ? ' result-card-consolidated' : ''}">
+      <div class="rc-nome">${r.nome}${r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' : ''}</div>
       ${r.tem_sdr ? `
       <div class="rc-row"><span class="rc-label">Closers c/ Multi</span><span>${pctBadge(r.ating_closer)}</span></div>
       <div class="rc-row"><span class="rc-label">SDR Final</span><span>${pctBadge(r.ating_sdr)}</span></div>` :
