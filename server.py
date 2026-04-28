@@ -482,6 +482,26 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "sdr_total": ts,
         })
 
+    # ── Card consolidado Denise (Elite + Sniper + MGM/Olympus) ──
+    DENISE_SQUADS = {"elite", "sniper", "mgm", "olympus"}
+    denise_squads = [r for r in squads_result if norm(r["nome"]) in DENISE_SQUADS]
+    if denise_squads:
+        d_closer = arred(safe_div(
+            sum(sq["ating_closer"] for sq in denise_squads),
+            len(denise_squads)
+        ))
+        d_sdr_vals = [sq["ating_sdr"] for sq in denise_squads if sq["ating_sdr"] is not None]
+        d_sdr = arred(sum(d_sdr_vals) / len(d_sdr_vals)) if d_sdr_vals else None
+        d_resultado = arred((d_closer + d_sdr) / 2) if d_sdr is not None else d_closer
+        squads_result.append({
+            "nome": "Denise Mussolin",
+            "ating_closer": d_closer,
+            "ating_sdr": d_sdr,
+            "resultado": d_resultado,
+            "tem_sdr": d_sdr is not None,
+            "is_consolidated": True,
+        })
+
     return {
         "periodo": {
             "mes": mes, "ano": ano,
