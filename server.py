@@ -362,7 +362,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         sub = nome_to_subarea.get(nn, "")
         if not sub or not visivel(sub): continue
         meta_reu = m["meta_reu"] / 10
-        meta_fin = m["meta_fin"]
+        meta_fin = m["meta_fin"] / 10
         uid      = nome_norm_to_uid.get(nn)
         uid_str  = str(uid) if uid else ""
         acts_sdr = acts_by_owner.get(uid_str, [])
