@@ -324,25 +324,30 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
         }
 
-    # Add head's own sales to their squad
+    # Add head's own sales to their OWN squad only (their subarea in COLAB)
     for uid, uname in users_pipe.items():
         head_squads_h = get_head_squads(uname, colab_df)
-        for hs in head_squads_h:
-            display_sub = next((k for k in squad_data if norm(k) == hs), None)
-            if display_sub and norm(uname) in closer_real:
-                ri = closer_real[norm(uname)]
-                # Add to squad totals
-                squad_data[display_sub]["realizado"]       += ri["valor"]
-                squad_data[display_sub]["realizado_multi"] += ri["valor_multi"]
-                squad_data[display_sub]["qtd"]             += ri["qtd"]
-                # Add as member if not already there
-                existing = [m["nome"] for m in squad_members.get(display_sub, [])]
-                if uname not in existing:
-                    squad_members[display_sub].append({
-                        "nome": uname, "meta": 0,
-                        "realizado": ri["valor"], "realizado_multi": ri["valor_multi"],
-                        "qtd": ri["qtd"], "is_head": True,
-                    })
+        if not head_squads_h or norm(uname) not in closer_real:
+            continue
+        # Find the head's own subarea from COLAB
+        own_sub = nome_to_subarea.get(norm(uname), "")
+        if not own_sub:
+            continue
+        own_sub_norm = norm(own_sub)
+        # Only add to their own squad, not all squads they lead
+        display_sub = next((k for k in squad_data if norm(k) == own_sub_norm), None)
+        if display_sub:
+            ri = closer_real[norm(uname)]
+            squad_data[display_sub]["realizado"]       += ri["valor"]
+            squad_data[display_sub]["realizado_multi"] += ri["valor_multi"]
+            squad_data[display_sub]["qtd"]             += ri["qtd"]
+            existing = [m["nome"] for m in squad_members.get(display_sub, [])]
+            if uname not in existing:
+                squad_members[display_sub].append({
+                    "nome": uname, "meta": 0,
+                    "realizado": ri["valor"], "realizado_multi": ri["valor_multi"],
+                    "qtd": ri["qtd"], "is_head": True,
+                })
 
     squads = []
     for sub, sd in squad_data.items():
@@ -518,6 +523,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "deals_mes": len(deals),
             "nomes_closers": [m["nome"] for m in closers_metas],
             "head_squads_debug": {u: list(get_head_squads(u, colab_df)) for u in set(str(r.get(next((c for c in colab_df.columns if "head" in c.lower()), ""), "")).strip() for _, r in colab_df.iterrows()) if u},
+            "denise_subarea": nome_to_subarea.get(norm("Denise Mussolin"), "NAO ENCONTRADO"),
+            "squad_members_keys": {k: [m["nome"] for m in v] for k, v in squad_members.items()},
             "todos_abril": [{"nome": m["nome"], "meta_reu": m["meta_reu"], "meta_fin": m["meta_fin"]} for m in metas],
             "subareas": {m["nome"]: nome_to_subarea.get(m["nome_norm"], "NAO ENCONTRADO") for m in closers_metas},
         }
