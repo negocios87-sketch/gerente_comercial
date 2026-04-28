@@ -434,6 +434,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     total_geral_c   = total_closers(all_closers_ind)
     total_geral_s   = total_sdrs(all_sdrs_ind)
 
+    squads_final = {}  # inicializa antes do bloco LIC
     # Agrupa squads LIC-* em "Licenciados"
     lic_closers = []
     lic_sdrs    = []
