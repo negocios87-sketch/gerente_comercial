@@ -428,14 +428,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "pct_final": arred((pct_r + pct_g) / 2),
         }
 
-    # ── Total consolidado ─────────────────────────────────────
-    all_closers_ind = [c for sq in squads_final.values() for c in sq["closers_ind"]]
-    all_sdrs_ind    = [s for sq in squads_final.values() for s in sq["sdrs_ind"]]
-    total_geral_c   = total_closers(all_closers_ind)
-    total_geral_s   = total_sdrs(all_sdrs_ind)
-
-    squads_final = {}  # inicializa antes do bloco LIC
     # Agrupa squads LIC-* em "Licenciados"
+    squads_final = {}
     lic_closers = []
     lic_sdrs    = []
     squads_final = {}
@@ -452,6 +446,12 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "closers_ind": lic_closers,
             "sdrs_ind": lic_sdrs,
         }
+
+    # ── Total consolidado ─────────────────────────────────────
+    all_closers_ind = [c for sq in squads_final.values() for c in sq["closers_ind"]]
+    all_sdrs_ind    = [s for sq in squads_final.values() for s in sq["sdrs_ind"]]
+    total_geral_c   = total_closers(all_closers_ind)
+    total_geral_s   = total_sdrs(all_sdrs_ind)
 
     # ── Resultado por Squad (usando squads_final com LIC agrupado) ──
     squads_result = []
