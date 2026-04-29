@@ -241,14 +241,19 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
 
     # Mapas
+    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
+
     nome_to_subarea = {}
     nome_to_head    = {}
+    nome_to_cargo   = {}
     for _, row in colab_df.iterrows():
         nn  = norm(str(row.get(nome_col, "")))
         sub = str(row.get(sub_col, "")).strip() if sub_col else ""
         hd  = str(row.get(head_col, "")).strip() if head_col else ""
+        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
         nome_to_subarea[nn] = sub
         nome_to_head[nn]    = hd
+        nome_to_cargo[nn]   = cg
 
     uid_to_nome      = {uid: name for uid, name in users_pipe.items()}
     uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
@@ -358,7 +363,6 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         )
 
     # Heads e Líderes de closer no próprio squad
-    lider_com_meta_reu_norms = {m["nome_norm"] for m in metas if m["meta_reu"] > 0}
     for uid, uname in users_pipe.items():
         nn      = norm(uname)
         own_sub = nome_to_subarea.get(nn, "")
@@ -366,7 +370,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if nn not in closer_real: continue
         # é head ou líder de closer (líder sem meta de reunião)
         is_head_of  = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
-        is_lider_of = nn in lider_nomes and nn not in lider_com_meta_reu_norms
+        is_lider_of = nn in lider_nomes and nn not in team_leaders
         if not is_head_of and not is_lider_of: continue
         existing = [norm(c["nome"]) for c in squads.get(own_sub, {}).get("closers_ind", [])]
         if nn in existing: continue
@@ -415,14 +419,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     # ── Líderes de SDR sem meta mas com atividade/ganho ─────────
     sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
-    # Líderes com meta_reu > 0 = líder de SDR; sem meta_reu = líder de closer (já tratado)
-    lider_com_meta_reu = {m["nome_norm"] for m in metas if m["meta_reu"] > 0}
+    # Líderes de SDR = cargo contém "team leader"
+    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg)}
 
     for uid, uname in users_pipe.items():
         nn = norm(uname)
-        if nn not in lider_nomes: continue
+        if nn not in lider_nomes and nn not in team_leaders: continue
         if nn in sdr_nomes_ja: continue
-        if nn not in lider_com_meta_reu: continue  # líder de closer, não de SDR
+        if nn not in team_leaders: continue  # não é team leader, não vai pra SDR
         own_sub = nome_to_subarea.get(nn, "")
         if not own_sub or not visivel(own_sub): continue
 
