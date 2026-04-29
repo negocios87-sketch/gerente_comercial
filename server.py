@@ -352,15 +352,17 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"])
         )
 
-    # Heads como closers no próprio squad
+    # Heads e Líderes de closer no próprio squad
+    lider_com_meta_reu_norms = {m["nome_norm"] for m in metas if m["meta_reu"] > 0}
     for uid, uname in users_pipe.items():
         nn      = norm(uname)
         own_sub = nome_to_subarea.get(nn, "")
         if not own_sub or not visivel(own_sub): continue
         if nn not in closer_real: continue
-        # só adiciona se for head de algum squad e não já estiver como closer
-        is_head_of = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
-        if not is_head_of: continue
+        # é head ou líder de closer (líder sem meta de reunião)
+        is_head_of  = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
+        is_lider_of = nn in lider_nomes and nn not in lider_com_meta_reu_norms
+        if not is_head_of and not is_lider_of: continue
         existing = [norm(c["nome"]) for c in squads.get(own_sub, {}).get("closers_ind", [])]
         if nn in existing: continue
         ri = closer_real[nn]
