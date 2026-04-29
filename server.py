@@ -257,6 +257,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg)}
 
+    # Squads sem SDR — líderes desses squads vão para Closer, não SDR
+    SQUADS_SEM_SDR = {"latam", "orion"}
+
     uid_to_nome      = {uid: name for uid, name in users_pipe.items()}
     uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
     nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
@@ -426,6 +429,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if nn not in lider_nomes and nn not in team_leaders: continue
         if nn in sdr_nomes_ja: continue
         if nn not in team_leaders: continue  # não é team leader, não vai pra SDR
+        if norm(own_sub) in SQUADS_SEM_SDR: continue  # squad sem SDR, vai pra closer
         own_sub = nome_to_subarea.get(nn, "")
         if not own_sub or not visivel(own_sub): continue
 
