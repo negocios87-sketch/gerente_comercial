@@ -346,17 +346,22 @@ function renderClosers(closers, total, squadIdx) {
 // ── SDR TABLE ─────────────────────────────────────────────────
 function sdrRow(s, isMember, gid) {
   const cls = isMember ? `row-member" data-mid="${gid}` : ``;
-  const nameCell = `<div class="name-cell">${avatarHtml(s.nome)}<span>${s.nome}</span></div>`;
+  const sdrNomeLbl = s.is_lider ? `${s.nome} <span class="badge-lider">LÍDER</span>` : s.nome;
+  const nameCell = `<div class="name-cell">${avatarHtml(s.nome)}<span>${sdrNomeLbl}</span></div>`;
   return `<tr class="${cls}">
     <td>${nameCell}</td>
-    <td>${N(s.meta_reuniao)}</td><td>${s.meta_diaria.toFixed(1)}</td>
-    <td>${N(s.validadas)}</td><td>${s.deveria_estar.toFixed(0)}</td>
-    <td>${s.faltam<=0?`<span class="surplus">${N(Math.abs(s.faltam))}</span>`:`<span class="deficit">${N(s.faltam)}</span>`}</td>
-    <td>${pctBadge(s.pct_reu)}</td>
-    <td>${R(s.meta_ganho)}</td><td>${N(s.qtd_ganhos)}</td>
+    <td>${s.meta_reuniao > 0 ? N(s.meta_reuniao) : '—'}</td>
+    <td>${s.meta_diaria > 0 ? s.meta_diaria.toFixed(1) : '—'}</td>
+    <td>${N(s.validadas)}</td>
+    <td>${s.deveria_estar > 0 ? s.deveria_estar.toFixed(0) : '—'}</td>
+    <td>${s.meta_reuniao > 0 ? (s.faltam<=0?`<span class="surplus">${N(Math.abs(s.faltam))}</span>`:`<span class="deficit">${N(s.faltam)}</span>`) : '—'}</td>
+    <td>${s.meta_reuniao > 0 ? pctBadge(s.pct_reu) : '—'}</td>
+    <td>${s.meta_ganho > 0 ? R(s.meta_ganho) : '—'}</td>
+    <td>${N(s.qtd_ganhos)}</td>
     <td>${R(s.valor_ganho)}</td><td class="val-multi">${R(s.valor_ganho_multi)}</td>
-    <td>${pctBadge(s.pct_ganhos)}</td><td>${R(s.ticket_medio)}</td>
-    <td>${pctBadge(s.pct_final)}</td>
+    <td>${s.meta_ganho > 0 ? pctBadge(s.pct_ganhos) : '—'}</td>
+    <td>${R(s.ticket_medio)}</td>
+    <td>${s.meta_reuniao > 0 || s.meta_ganho > 0 ? pctBadge(s.pct_final) : '—'}</td>
   </tr>`;
 }
 
