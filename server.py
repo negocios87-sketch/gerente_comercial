@@ -467,6 +467,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "ating_sdr": arred(ating_sdr) if ating_sdr is not None else None,
             "resultado": arred(resultado),
             "tem_sdr": ts is not None,
+            # Closer values
+            "closer_bruto":  arred(tc["realizado"]) if tc else 0,
+            "closer_multi":  arred(tc["realizado_multi"]) if tc else 0,
+            "closer_vol":    tc["qtd_ganhos"] if tc else 0,
+            # SDR values
+            "sdr_bruto":     arred(ts["valor_ganho"]) if ts else 0,
+            "sdr_multi":     arred(ts["valor_ganho_multi"]) if ts else 0,
+            "sdr_reunioes":  ts["validadas"] if ts else 0,
         })
 
     # Serializa squads
@@ -500,6 +508,12 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "resultado": d_resultado,
             "tem_sdr": d_sdr is not None,
             "is_consolidated": True,
+            "closer_bruto":  arred(sum(sq.get("closer_bruto", 0) for sq in denise_squads)),
+            "closer_multi":  arred(sum(sq.get("closer_multi", 0) for sq in denise_squads)),
+            "closer_vol":    sum(sq.get("closer_vol", 0) for sq in denise_squads),
+            "sdr_bruto":     arred(sum(sq.get("sdr_bruto", 0) for sq in denise_squads)),
+            "sdr_multi":     arred(sum(sq.get("sdr_multi", 0) for sq in denise_squads)),
+            "sdr_reunioes":  sum(sq.get("sdr_reunioes", 0) for sq in denise_squads),
         })
 
     return {
