@@ -255,6 +255,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         nome_to_head[nn]    = hd
         nome_to_cargo[nn]   = cg
 
+    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg)}
+
     uid_to_nome      = {uid: name for uid, name in users_pipe.items()}
     uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
     nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
@@ -419,9 +421,6 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     # ── Líderes de SDR sem meta mas com atividade/ganho ─────────
     sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
-    # Líderes de SDR = cargo contém "team leader"
-    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg)}
-
     for uid, uname in users_pipe.items():
         nn = norm(uname)
         if nn not in lider_nomes and nn not in team_leaders: continue
