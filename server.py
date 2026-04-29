@@ -429,9 +429,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if nn not in lider_nomes and nn not in team_leaders: continue
         if nn in sdr_nomes_ja: continue
         if nn not in team_leaders: continue  # não é team leader, não vai pra SDR
-        if norm(own_sub) in SQUADS_SEM_SDR: continue  # squad sem SDR, vai pra closer
         own_sub = nome_to_subarea.get(nn, "")
         if not own_sub or not visivel(own_sub): continue
+        if norm(own_sub) in SQUADS_SEM_SDR: continue  # squad sem SDR, vai pra closer
 
         uid_str  = str(uid)
         acts_sdr = acts_by_owner.get(uid_str, [])
