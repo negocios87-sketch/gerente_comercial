@@ -325,7 +325,7 @@ function renderClosers(closers, total, squadIdx) {
   </tr>` : '';
   // Group header row (collapsible)
   const groupRow = total ? `<tr class="row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')">
-    <td colspan="4">Closers (${closers.length})</td>
+    <td>Closers (${closers.length})</td><td>${R(total.meta)}</td><td>${N(total.dias_uteis)}</td><td>${R(total.meta_du)}</td>
     <td class="col-sem val-real">${R(total.realizado)}</td><td class="col-sem">${pctBadge(total.pct_atingido)}</td>
     <td class="col-sem">${R(total.mtd)}</td><td class="col-sem">${defVal(total.deficit_mtd)}</td>
     <td class="col-sem">${pctBadge(total.pct_mtd)}</td><td class="col-sem">${defVal(total.deficit_meta)}</td>
