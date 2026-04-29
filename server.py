@@ -255,14 +255,19 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
 
     # Squads visíveis pelo head_filter
-    if head_filter:
+    if head_filter is None:
+        squads_visiveis = None  # tudo
+    elif head_filter == "__none__":
+        squads_visiveis = set()  # nada
+    elif head_filter.startswith("__squad__:"):
+        sub_direto = norm(head_filter.replace("__squad__:", ""))
+        squads_visiveis = {sub_direto}
+    else:
         head_nn = norm(head_filter)
         squads_visiveis = set(
             norm(sub) for nn, sub in nome_to_subarea.items()
             if norm(nome_to_head.get(nn, "")) == head_nn and sub
         )
-    else:
-        squads_visiveis = None  # tudo
 
     def visivel(sub):
         return squads_visiveis is None or norm(sub) in squads_visiveis
@@ -629,19 +634,43 @@ def api_abril():
         nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
         # Superusuários sempre veem tudo
         superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        if norm(nome_sess) in superusers:
-            is_gerente = True
+        nn_sess = norm(nome_sess)
+
+        if nn_sess in superusers:
+            # Superuser vê tudo
+            head_filter = None
         else:
-            is_gerente = True
+            # Verifica se é Head
+            is_head = False
             if head_col:
                 for _, row in colab_df.iterrows():
-                    if norm(str(row.get(nome_col, ""))) == norm(nome_sess):
-                        hd = norm(str(row.get(head_col, "")))
-                        if hd and hd != norm(nome_sess):
-                            is_gerente = False
+                    if norm(str(row.get(head_col, ""))) == nn_sess:
+                        is_head = True
                         break
 
-        head_filter = None if is_gerente else nome_sess
+            if is_head:
+                # Head vê os squads onde é Head
+                head_filter = nome_sess
+            else:
+                # Verifica se é Líder
+                lider_col_l = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+                is_lider = False
+                lider_sub = None
+                if lider_col_l:
+                    for _, row in colab_df.iterrows():
+                        if norm(str(row.get(lider_col_l, ""))) == nn_sess:
+                            sub = str(row.get(sub_col if (sub_col := next((c for c in colab_df.columns if norm(c) == "subarea"), None)) else "Subárea", "")).strip()
+                            if sub:
+                                lider_sub = sub
+                                is_lider = True
+                                break
+
+                if is_lider and lider_sub:
+                    # Líder vê só o próprio squad — usa squad_filter especial
+                    head_filter = f"__squad__:{lider_sub}"
+                else:
+                    # Pessoa sem cargo especial — não vê nada
+                    head_filter = "__none__"
         return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano, head_filter=head_filter)))
     except Exception as e:
         import traceback
