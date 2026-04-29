@@ -114,6 +114,11 @@
     .rc-label { color: var(--text-muted); }
     .rc-total { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700; }
 
+
+    .rc-section-label { font-size: 9px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; margin-top: 4px; }
+    .rc-val { font-weight: 600; color: var(--navy); font-size: 11px; }
+    .rc-val-multi { font-weight: 600; color: #5B21B6; font-size: 11px; }
+
     .result-card-consolidated {
       border-left: 3px solid var(--navy);
       background: #F8F9FF;
@@ -389,10 +394,17 @@ function renderResultados(resultados) {
   const cards = resultados.map(r => `
     <div class="result-card${r.is_consolidated ? ' result-card-consolidated' : ''}">
       <div class="rc-nome">${r.nome}${r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' : ''}</div>
+      <div class="rc-section-label">Closers</div>
+      <div class="rc-row"><span class="rc-label">% c/ Multi</span><span>${pctBadge(r.ating_closer)}</span></div>
+      <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.closer_bruto)}</span></div>
+      <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.closer_multi)}</span></div>
+      <div class="rc-row"><span class="rc-label">Vol. Ganhos</span><span class="rc-val">${N(r.closer_vol)}</span></div>
       ${r.tem_sdr ? `
-      <div class="rc-row"><span class="rc-label">Closers c/ Multi</span><span>${pctBadge(r.ating_closer)}</span></div>
-      <div class="rc-row"><span class="rc-label">SDR Final</span><span>${pctBadge(r.ating_sdr)}</span></div>` :
-      `<div class="rc-row"><span class="rc-label">Atingimento</span><span>${pctBadge(r.ating_closer)}</span></div>`}
+      <div class="rc-section-label" style="margin-top:8px">SDR's</div>
+      <div class="rc-row"><span class="rc-label">% Final</span><span>${pctBadge(r.ating_sdr)}</span></div>
+      <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.sdr_bruto)}</span></div>
+      <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.sdr_multi)}</span></div>
+      <div class="rc-row"><span class="rc-label">Reuniões Valid.</span><span class="rc-val">${N(r.sdr_reunioes)}</span></div>` : ''}
       <div class="rc-total"><span>Resultado</span><span>${pctBadge(r.resultado)}</span></div>
       <div class="rc-bar"><div class="rc-fill" style="width:${Math.min(r.resultado,100)}%;background:${barColor(r.resultado)}"></div></div>
     </div>`).join('');
