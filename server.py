@@ -255,7 +255,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         nome_to_head[nn]    = hd
         nome_to_cargo[nn]   = cg
 
-    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg)}
+    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
 
     # Squads sem SDR — líderes desses squads vão para Closer, não SDR
     SQUADS_SEM_SDR = {"latam", "orion"}
@@ -376,7 +376,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         # é head ou líder de closer (líder sem meta de reunião)
         is_head_of  = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
         is_lider_of = nn in lider_nomes and nn not in team_leaders
-        if not is_head_of and not is_lider_of: continue
+        # Team leader de squad sem SDR também vai pra closer
+        is_tl_sem_sdr = nn in team_leaders and norm(own_sub) in SQUADS_SEM_SDR
+        if not is_head_of and not is_lider_of and not is_tl_sem_sdr: continue
         existing = [norm(c["nome"]) for c in squads.get(own_sub, {}).get("closers_ind", [])]
         if nn in existing: continue
         ri = closer_real[nn]
@@ -583,6 +585,18 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "sdr_multi":     arred(sum(sq.get("sdr_multi", 0) for sq in denise_squads)),
             "sdr_reunioes":  sum(sq.get("sdr_reunioes", 0) for sq in denise_squads),
         })
+
+    # Debug Larissa
+    larissa_nn = norm("Larissa Vitor")
+    _debug_larissa = {
+        "in_closer_real": larissa_nn in closer_real,
+        "in_team_leaders": larissa_nn in team_leaders,
+        "in_lider_nomes": larissa_nn in lider_nomes,
+        "own_sub": nome_to_subarea.get(larissa_nn, "NAO ENCONTRADO"),
+        "closer_real_value": closer_real.get(larissa_nn, "NAO ENCONTRADO"),
+        "nome_to_cargo": nome_to_cargo.get(larissa_nn, "NAO ENCONTRADO"),
+        "latam_closers": [c["nome"] for sq in squads.values() if norm(sq.get("nome","")) == "latam" or True for c in sq.get("closers_ind",[])],
+    }
 
     return {
         "periodo": {
