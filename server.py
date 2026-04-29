@@ -321,6 +321,18 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
         }
 
+    # Coluna de líder
+    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+
+    # Mapa: nome_norm -> é líder de alguém
+    lider_nomes = set()
+    if lider_col:
+        for _, row in colab_df.iterrows():
+            lider_nome = norm(str(row.get(lider_col, "")))
+            membro_nome = norm(str(row.get(nome_col, "")))
+            if lider_nome and lider_nome != membro_nome:
+                lider_nomes.add(lider_nome)
+
     # ── Organiza por Squad ─────────────────────────────────────
     squads = {}  # sub -> {closers: [], sdrs: [], nome: sub}
 
@@ -390,6 +402,44 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "valor_ganho": arred(valor_ganho),
             "valor_ganho_multi": arred(valor_multi),
             "pct_ganhos": pct_ganhos,
+            "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
+            "pct_final": pct_final,
+        })
+
+    # ── Líderes de SDR sem meta mas com atividade/ganho ─────────
+    sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
+    for uid, uname in users_pipe.items():
+        nn = norm(uname)
+        if nn not in lider_nomes: continue
+        if nn in sdr_nomes_ja: continue  # já está na lista
+        own_sub = nome_to_subarea.get(nn, "")
+        if not own_sub or not visivel(own_sub): continue
+
+        uid_str  = str(uid)
+        acts_sdr = acts_by_owner.get(uid_str, [])
+        validadas    = [a for a in acts_sdr if act_valida(a)]
+        qtd_val      = len(validadas)
+
+        qual_id      = qual_ids.get(nn)
+        deals_sdr    = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
+        qtd_ganhos   = len(deals_sdr)
+        valor_ganho  = sum(float(d.get("value") or 0) for d in deals_sdr)
+        valor_multi  = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
+
+        if qtd_val == 0 and qtd_ganhos == 0: continue  # nada a mostrar
+
+        pct_final = 0.0  # sem meta, sem % calculado
+        get_squad(own_sub)["sdrs_ind"].append({
+            "nome": uname, "subarea": own_sub,
+            "is_lider": True,
+            "meta_reuniao": 0, "meta_diaria": 0,
+            "validadas": qtd_val, "deveria_estar": 0,
+            "faltam": 0, "pct_reu": 0,
+            "meta_ganho": 0,
+            "qtd_ganhos": qtd_ganhos,
+            "valor_ganho": arred(valor_ganho),
+            "valor_ganho_multi": arred(valor_multi),
+            "pct_ganhos": 0,
             "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
             "pct_final": pct_final,
         })
