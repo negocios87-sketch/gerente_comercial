@@ -408,10 +408,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     # ── Líderes de SDR sem meta mas com atividade/ganho ─────────
     sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
+    # Líderes com meta_reu > 0 = líder de SDR; sem meta_reu = líder de closer (já tratado)
+    lider_com_meta_reu = {m["nome_norm"] for m in metas if m["meta_reu"] > 0}
+
     for uid, uname in users_pipe.items():
         nn = norm(uname)
         if nn not in lider_nomes: continue
-        if nn in sdr_nomes_ja: continue  # já está na lista
+        if nn in sdr_nomes_ja: continue
+        if nn not in lider_com_meta_reu: continue  # líder de closer, não de SDR
         own_sub = nome_to_subarea.get(nn, "")
         if not own_sub or not visivel(own_sub): continue
 
