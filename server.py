@@ -218,6 +218,21 @@ def buscar_activities_mes(mes, ano):
     return todos
 
 # ── CÁLCULO ───────────────────────────────────────────────────
+
+def buscar_deals_por_ids(deal_ids):
+    """Busca deals individuais para montar mapa_rv completo"""
+    mapa = {}
+    for did in deal_ids:
+        try:
+            resp = req.get(f"{BASE_V1}/deals/{did}",
+                params={"api_token": API_KEY}, timeout=10)
+            if resp.status_code == 200:
+                d = resp.json().get("data") or {}
+                mapa[did] = cf(d, CF_REUNIAO_VALID)
+        except:
+            pass
+    return mapa
+
 def calcular_abril(mes=None, ano=None, head_filter=None):
     hoje = date.today()
     mes  = mes or hoje.month
@@ -299,7 +314,12 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         closer_real[owner_nome]["qtd"]         += 1
 
     # ── Atividades por owner ──────────────────────────────────
-    mapa_rv = {d["id"]: cf(d, CF_REUNIAO_VALID) for d in deals}
+    mapa_rv_ganhos = {d["id"]: cf(d, CF_REUNIAO_VALID) for d in deals}
+    # Busca deals extras vinculados às activities que não estão nos ganhos do mês
+    deal_ids_acts = [a.get("deal_id") for a in activities if a.get("deal_id")]
+    ids_faltando  = [did for did in deal_ids_acts if did not in mapa_rv_ganhos]
+    mapa_rv_extra = buscar_deals_por_ids(ids_faltando)
+    mapa_rv = {**mapa_rv_ganhos, **mapa_rv_extra}
     acts_by_owner = {}
     for act in activities:
         oid = str(act.get("owner_id", ""))
