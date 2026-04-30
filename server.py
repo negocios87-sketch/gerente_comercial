@@ -21,7 +21,7 @@ API_KEY           = os.environ.get("PIPE_API_KEY", "")
 BASE_V1           = "https://boardacademy.pipedrive.com/api/v1"
 BASE_V2           = "https://boardacademy.pipedrive.com/api/v2"
 FILTER_DEALS      = int(os.environ.get("FILTER_DEALS",      "74674"))
-FILTER_DEALS_RV   = int(os.environ.get("FILTER_DEALS_RV",   "71714"))
+FILTER_DEALS_RV   = int(os.environ.get("FILTER_DEALS_RV",   "1431880"))
 FILTER_ACTIVITIES = int(os.environ.get("FILTER_ACTIVITIES", "1310451"))
 
 CF_MULTIPLICADOR = "7e0e43c2734751f77be292a72527f638a850ad50"
@@ -366,8 +366,10 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
         if act_owner and deal_owner and act_owner == deal_owner:
             return False
-        rv = mapa_rv.get(deal_id)
-        return rv is None or str(rv).strip() == "" or norm(str(rv)) == "sim"
+        # Deal deve estar no filtro de reuniões válidas
+        if deal_id and deal_id not in deal_ids_validos:
+            return False
+        return True
 
     # ── Metas por tipo ────────────────────────────────────────
     du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
