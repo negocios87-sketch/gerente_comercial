@@ -220,17 +220,33 @@ def buscar_activities_mes(mes, ano):
 # ── CÁLCULO ───────────────────────────────────────────────────
 
 def buscar_deals_por_ids(deal_ids):
-    """Busca deals individuais para montar mapa_rv completo"""
+    """Busca deals individuais em paralelo para montar mapa_rv completo"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     mapa = {}
-    for did in deal_ids:
+    if not deal_ids:
+        return mapa
+
+    def fetch_one(did):
         try:
             resp = req.get(f"{BASE_V1}/deals/{did}",
-                params={"api_token": API_KEY}, timeout=10)
+                params={"api_token": API_KEY}, timeout=8)
             if resp.status_code == 200:
                 d = resp.json().get("data") or {}
-                mapa[did] = cf(d, CF_REUNIAO_VALID)
+                return did, cf(d, CF_REUNIAO_VALID)
         except:
             pass
+        return did, None
+
+    # Máximo 50 deals extras para evitar timeout
+    ids_limitados = list(set(deal_ids))[:50]
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_one, did): did for did in ids_limitados}
+        for future in as_completed(futures, timeout=20):
+            try:
+                did, rv = future.result()
+                mapa[did] = rv
+            except:
+                pass
     return mapa
 
 def calcular_abril(mes=None, ano=None, head_filter=None):
