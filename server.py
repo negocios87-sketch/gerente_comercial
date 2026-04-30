@@ -330,7 +330,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         closer_real[owner_nome]["qtd"]         += 1
 
     # ── Atividades por owner ──────────────────────────────────
-    mapa_rv_ganhos = {d["id"]: cf(d, CF_REUNIAO_VALID) for d in deals}
+    mapa_rv_ganhos  = {d["id"]: cf(d, CF_REUNIAO_VALID) for d in deals}
+    mapa_deal_owner = {d["id"]: get_owner_id(d) for d in deals}
     # Busca deals extras vinculados às activities que não estão nos ganhos do mês
     deal_ids_acts = [a.get("deal_id") for a in activities if a.get("deal_id")]
     ids_faltando  = [did for did in deal_ids_acts if did not in mapa_rv_ganhos]
@@ -343,7 +344,13 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     def act_valida(act):
         if not (act.get("done") is True or act.get("status") == "done"): return False
-        rv = mapa_rv.get(act.get("deal_id"))
+        # SDR não pode agendar reunião para si mesmo
+        deal_id = act.get("deal_id")
+        act_owner = str(act.get("owner_id", ""))
+        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
+        if act_owner and deal_owner and act_owner == deal_owner:
+            return False
+        rv = mapa_rv.get(deal_id)
         return rv is None or str(rv).strip() == "" or norm(str(rv)) == "sim"
 
     # ── Metas por tipo ────────────────────────────────────────
