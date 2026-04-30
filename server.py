@@ -21,6 +21,7 @@ API_KEY           = os.environ.get("PIPE_API_KEY", "")
 BASE_V1           = "https://boardacademy.pipedrive.com/api/v1"
 BASE_V2           = "https://boardacademy.pipedrive.com/api/v2"
 FILTER_DEALS      = int(os.environ.get("FILTER_DEALS",      "74674"))
+FILTER_DEALS_RV   = int(os.environ.get("FILTER_DEALS_RV",   "71714"))
 FILTER_ACTIVITIES = int(os.environ.get("FILTER_ACTIVITIES", "1310451"))
 
 CF_MULTIPLICADOR = "7e0e43c2734751f77be292a72527f638a850ad50"
@@ -236,14 +237,15 @@ def buscar_deals_por_ids(deal_ids):
     return mapa
 
 
-def buscar_todos_deals_rv():
-    """Busca todos os deals do filtro (todos os status) só para montar mapa_rv"""
-    mapa_rv = {}
+def buscar_deals_rv_mes(mes, ano):
+    """Busca deals do filtro RV (reunião válida = Sim ou vazia, do mês)
+    Se o deal está nesse filtro, a reunião é válida por definição."""
+    deal_ids_validos = set()
     mapa_owner = {}
     start = 0
     while True:
         resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS,
+            "filter_id": FILTER_DEALS_RV,
             "status": "all_not_deleted",
             "limit": 500, "start": start,
             "api_token": API_KEY,
@@ -253,14 +255,14 @@ def buscar_todos_deals_rv():
         lote = data.get("data") or []
         for d in lote:
             did = d["id"]
-            mapa_rv[did] = cf(d, CF_REUNIAO_VALID)
             uid = d.get("user_id")
+            deal_ids_validos.add(did)
             mapa_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
         mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
         if not mais or not lote:
             break
         start += 500
-    return mapa_rv, mapa_owner
+    return deal_ids_validos, mapa_owner
 
 def calcular_abril(mes=None, ano=None, head_filter=None):
     hoje = date.today()
@@ -343,8 +345,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         closer_real[owner_nome]["qtd"]         += 1
 
     # ── Atividades por owner ──────────────────────────────────
-    # Busca todos os deals (todos os status) para mapa_rv e mapa_deal_owner completos
-    mapa_rv, mapa_deal_owner = buscar_todos_deals_rv()
+    # Busca deals para mapa_rv (todos os status, paginado)
+    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
+    # Completa mapa_owner com deals ganhos do mês
+    for d in deals:
+        did = d["id"]
+        if did not in mapa_deal_owner:
+            uid = d.get("user_id")
+            mapa_deal_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
     acts_by_owner = {}
     for act in activities:
         oid = str(act.get("owner_id", ""))
