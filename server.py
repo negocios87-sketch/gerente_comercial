@@ -235,6 +235,33 @@ def buscar_deals_por_ids(deal_ids):
             pass
     return mapa
 
+
+def buscar_todos_deals_rv():
+    """Busca todos os deals do filtro (todos os status) só para montar mapa_rv"""
+    mapa_rv = {}
+    mapa_owner = {}
+    start = 0
+    while True:
+        resp = req.get(f"{BASE_V1}/deals", params={
+            "filter_id": FILTER_DEALS,
+            "status": "all_not_deleted",
+            "limit": 500, "start": start,
+            "api_token": API_KEY,
+        }, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        lote = data.get("data") or []
+        for d in lote:
+            did = d["id"]
+            mapa_rv[did] = cf(d, CF_REUNIAO_VALID)
+            uid = d.get("user_id")
+            mapa_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
+        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
+        if not mais or not lote:
+            break
+        start += 500
+    return mapa_rv, mapa_owner
+
 def calcular_abril(mes=None, ano=None, head_filter=None):
     hoje = date.today()
     mes  = mes or hoje.month
@@ -316,13 +343,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         closer_real[owner_nome]["qtd"]         += 1
 
     # ── Atividades por owner ──────────────────────────────────
-    mapa_rv_ganhos  = {d["id"]: cf(d, CF_REUNIAO_VALID) for d in deals}
-    mapa_deal_owner = {d["id"]: get_owner_id(d) for d in deals}
-    # Busca deals extras vinculados às activities que não estão nos ganhos do mês
-    deal_ids_acts = [a.get("deal_id") for a in activities if a.get("deal_id")]
-    ids_faltando  = [did for did in deal_ids_acts if did not in mapa_rv_ganhos]
-    mapa_rv_extra = buscar_deals_por_ids(ids_faltando)
-    mapa_rv = {**mapa_rv_ganhos, **mapa_rv_extra}
+    # Busca todos os deals (todos os status) para mapa_rv e mapa_deal_owner completos
+    mapa_rv, mapa_deal_owner = buscar_todos_deals_rv()
     acts_by_owner = {}
     for act in activities:
         oid = str(act.get("owner_id", ""))
