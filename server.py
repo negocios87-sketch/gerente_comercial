@@ -1,93 +1,108 @@
 """
-Board Academy — Forecast Dashboard
-Deploy: Render.com
+Board Academy — Dashboard SDR
+Servidor Python + Flask para Render
+
+Variáveis de ambiente necessárias no Render:
+    PIPEDRIVE_KEY = sua_chave_aqui
+    SECRET_KEY    = qualquer_string_aleatoria
 """
 
-from flask import Flask, jsonify, request, session, redirect, render_template
+from flask import Flask, jsonify, request, session, redirect, send_from_directory
 import requests as req
 import pandas as pd
 import os
 import unicodedata
-import calendar
-import math
 from datetime import date, datetime, timedelta
 from io import StringIO
 
-app = Flask(__name__, template_folder='.')
-app.secret_key = os.environ.get("SECRET_KEY", "boardacademy2026secret")
+app = Flask(__name__, static_folder="static")
+app.secret_key = os.getenv("SECRET_KEY", "boardacademy2026")
 
-API_KEY           = os.environ.get("PIPE_API_KEY", "")
+# ── CONFIG ──────────────────────────────────────────────────
+API_KEY  = os.getenv("PIPEDRIVE_KEY")
+BASE_V1  = "https://boardacademy.pipedrive.com/api/v1"
+BASE_V2  = "https://boardacademy.pipedrive.com/api/v2"
 
-BASE_V1           = "https://boardacademy.pipedrive.com/api/v1"
-BASE_V2           = "https://boardacademy.pipedrive.com/api/v2"
-FILTER_DEALS      = int(os.environ.get("FILTER_DEALS",      "74674"))
-FILTER_ACTIVITIES = int(os.environ.get("FILTER_ACTIVITIES", "1310451"))
+GITHUB_FOTOS = "https://raw.githubusercontent.com/negocios87-sketch/fotos_time_comercial/main"
+
+URL_COLAB = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1782440078&single=true&output=csv"
+URL_METAS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=0&single=true&output=csv"
+URL_OTE   = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=569278086&single=true&output=csv"
+URL_USERS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=160245570&single=true&output=csv"
+
+FILTER_DEALS      = 74674
+FILTER_ACTIVITIES = 1310451
 
 CF_MULTIPLICADOR = "7e0e43c2734751f77be292a72527f638a850ad50"
 CF_QUALIFICADOR  = "a6f13cc27c8d041f3af4091283ce0d4fe0913875"
 CF_REUNIAO_VALID = "7299bf170c5deab9b4fd8c2275f55faf51984dea"
 
-URL_COLAB    = os.environ.get("URL_COLAB",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1782440078&single=true&output=csv")
-URL_METAS    = os.environ.get("URL_METAS",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=0&single=true&output=csv")
-URL_USERS    = os.environ.get("URL_USERS",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=160245570&single=true&output=csv")
-URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1010928978&single=true&output=csv")
+# IDs do campo Reunião Validada?
+RV_SIM     = "411"
+RV_NAO     = "412"
+RV_NOSHOW  = "481"
 
-# ── HELPERS ───────────────────────────────────────────────────
+TIMES_ESCOPO = ["elite", "sniper", "atlantis", "mgm"]
+
+# ── HELPERS ─────────────────────────────────────────────────
 def norm(s):
-    if not s: return ""
+    if not s:
+        return ""
     s = str(s).strip().lower()
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
 
-SUPERUSERS_RAW = os.environ.get("SUPERUSERS", "farias souza")
-
 def arred(v):
     try:
-        f = float(v)
-        return 0.0 if math.isnan(f) or math.isinf(f) else round(f, 2)
-    except: return 0.0
+        return round(float(v), 2)
+    except:
+        return 0.0
 
-def safe_div(a, b):
-    try: return float(a) / float(b) if b else 0.0
-    except: return 0.0
+def acelerador(pct):
+    if pct >= 120: return 1.5
+    if pct >= 100: return 1.0
+    if pct >= 86:  return 0.7
+    if pct >= 60:  return 0.5
+    return 0.0
 
-def cf(deal, key):
-    val = deal.get(key)
-    if val is None: return None
-    if isinstance(val, dict): return val.get("value") or val.get("label")
-    return val
-
-def get_owner_name(deal):
-    uid = deal.get("user_id")
-    if isinstance(uid, dict): return uid.get("name", "")
-    return ""
-
-def get_owner_id(deal):
-    uid = deal.get("user_id")
-    if isinstance(uid, dict): return uid.get("id")
-    return uid
-
-def du_mes_total(ano, mes, feriados=set()):
-    return sum(1 for d in range(1, calendar.monthrange(ano, mes)[1] + 1)
-               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
-
-def du_passados(ano, mes, feriados=set()):
+def dias_uteis_passados():
     hoje = date.today()
-    return max(sum(1 for d in range(1, min(hoje.day, calendar.monthrange(ano, mes)[1]) + 1)
-                   if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados), 1)
+    count = 0
+    d = date(hoje.year, hoje.month, 1)
+    while d <= hoje:
+        if d.weekday() < 5:
+            count += 1
+        if d == hoje:
+            break
+        try:
+            d = date(d.year, d.month, d.day + 1)
+        except:
+            break
+    return max(count, 1)
 
-def du_restantes(ano, mes, feriados=set()):
-    hoje = date.today()
-    ultimo = calendar.monthrange(ano, mes)[1]
-    return sum(1 for d in range(hoje.day + 1, ultimo + 1)
-               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
+def ajustar_hora(hora_str):
+    if not hora_str:
+        return None
+    try:
+        h, m = hora_str[:5].split(":")
+        dt = datetime(2000, 1, 1, int(h), int(m)) - timedelta(hours=3)
+        return dt.strftime("%H:%M")
+    except:
+        return hora_str
 
-def limpar_nans(obj):
-    if isinstance(obj, dict): return {k: limpar_nans(v) for k, v in obj.items()}
-    if isinstance(obj, list): return [limpar_nans(v) for v in obj]
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)): return None
-    return obj
+def url_foto(nome):
+    """Tenta JPG, JPEG e PNG no GitHub"""
+    base = f"{GITHUB_FOTOS}/{nome}"
+    for ext in ["jpg", "jpeg", "png", "JPG", "JPEG", "PNG"]:
+        url = f"{base}.{ext}"
+        try:
+            r = req.head(url, timeout=5)
+            if r.status_code == 200:
+                return url
+        except:
+            pass
+    return None
 
-# ── SHEETS ────────────────────────────────────────────────────
+# ── SHEETS ──────────────────────────────────────────────────
 def ler_sheet(url):
     resp = req.get(url, timeout=15)
     resp.encoding = "utf-8"
@@ -99,626 +114,335 @@ def buscar_usuario(usuario, senha):
     df.columns = [c.strip().lower() for c in df.columns]
     for _, row in df.iterrows():
         if (norm(str(row.get("usuario", ""))) == norm(usuario) and
-                str(row.get("senha", "")).strip() == str(senha).strip()):
+            str(row.get("senha", "")).strip() == str(senha).strip()):
             return str(row.get("usuario", ""))
     return None
 
-def buscar_colaboradores():
+def buscar_colaborador(nome):
     df = ler_sheet(URL_COLAB)
     df.columns = [c.strip() for c in df.columns]
-    status_col = next((c for c in df.columns if "status" in norm(c)), None)
-    if status_col:
-        df = df[df[status_col].apply(lambda x: norm(str(x)) == "ativo")]
-    return df
+    for _, row in df.iterrows():
+        subarea = str(row.get("Subarea", ""))
+        status  = str(row.get("Status (Euqipe Comercial)", ""))
+        if (norm(str(row.get("Nome", ""))) == norm(nome) and
+            norm(status) == "ativo" and
+            norm(subarea) in TIMES_ESCOPO):
+            return {
+                "nome":  str(row.get("Nome", "")),
+                "time":  subarea,
+                "cargo": str(row.get("Cargo", "")),
+            }
+    return None
 
-def buscar_feriados():
-    try:
-        df = ler_sheet(URL_FERIADOS)
-        feriados = set()
-        for _, row in df.iterrows():
-            val = str(row.iloc[0]).strip()
-            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y"):
-                try:
-                    feriados.add(datetime.strptime(val, fmt).date())
-                    break
-                except: continue
-        return feriados
-    except: return set()
-
-def buscar_metas_todas(ano, mes):
+def buscar_metas(nome):
     df = ler_sheet(URL_METAS)
     df.columns = [c.strip() for c in df.columns]
+    hoje = date.today()
 
-    def to_num(v):
+    def limpar_numero(val):
         try:
-            if v is None: return 0.0
-            if isinstance(v, float) and math.isnan(v): return 0.0
-            return float(str(v).replace("R$","").replace(".","").replace(",",".").strip() or "0")
-        except: return 0.0
+            return float(str(val or "0").strip())
+        except:
+            return 0.0
 
-    col_ano  = next((c for c in df.columns if norm(c) == "ano"), None)
-    col_mes  = next((c for c in df.columns if norm(c) == "mes"), None)
-    col_nome = next((c for c in df.columns if norm(c) == "nome"), None)
-    col_reu  = next((c for c in df.columns if "reuni" in norm(c) and "meta" in norm(c)), None)
-    col_fin  = next((c for c in df.columns if "financ" in norm(c)), None)
-    col_du   = next((c for c in df.columns if "util" in norm(c)), None)
-
-    rows = []
     for _, row in df.iterrows():
         try:
-            a = int(float(str(row[col_ano]))) if col_ano else 0
-            m = int(float(str(row[col_mes]))) if col_mes else 0
-        except: continue
-        if a != ano or m != mes: continue
-        nome_raw = str(row[col_nome]).strip() if col_nome else ""
-        meta_reu = to_num(row[col_reu]) if col_reu else 0.0
-        meta_fin = (to_num(row[col_fin]) if col_fin else 0.0) / 10
-        dias_ut  = 0
-        if col_du:
-            try: dias_ut = int(float(str(row[col_du] or 0)))
-            except: dias_ut = 0
-        rows.append({
-            "nome": nome_raw, "nome_norm": norm(nome_raw),
-            "meta_reu": meta_reu, "meta_fin": meta_fin, "dias_uteis": dias_ut,
-        })
-    return rows
+            ano = int(float(str(row.get("Ano", 0))))
+            mes = int(float(str(row.get("Mes", row.get("Mês", 0)))))
+        except:
+            continue
+        if norm(row.get("Nome")) == norm(nome) and ano == hoje.year and mes == hoje.month:
+            ramp_str = str(row.get("% de Rampagem", "1") or "1").replace("%","").strip()
+            ramp_val = float(ramp_str)
+            ramp = ramp_val / 100 if ramp_val > 1 else ramp_val
+            return {
+                "meta_reu":   limpar_numero(row.get("Meta de Reunioes", row.get("Meta de Reuniões", 0))),
+                "meta_fin":   limpar_numero(row.get("Meta Financeira", 0)),
+                "rampagem":   ramp,
+                "dias_uteis": int(float(row.get("Dias Uteis", 20) or 20)),
+            }
+    return None
 
-# ── PIPEDRIVE ─────────────────────────────────────────────────
-def buscar_users_pipe():
-    resp = req.get(f"{BASE_V1}/users", params={"api_token": API_KEY}, timeout=15)
-    resp.raise_for_status()
-    return {u["id"]: u["name"] for u in (resp.json().get("data") or [])}
+def buscar_ote(cargo):
+    df = ler_sheet(URL_OTE)
+    df.columns = [c.strip() for c in df.columns]
+    for _, row in df.iterrows():
+        nivel = str(row.get("Nivel", row.get("Nível", "")))
+        if norm(nivel) == norm(cargo):
+            return {
+                "total":    float(row.get("ote_total", 0) or 0),
+                "fixo":     float(row.get("fixo", 0) or 0),
+                "variavel": float(row.get("variavel", 0) or 0),
+            }
+    return None
 
-def buscar_qual_ids():
-    resp = req.get(f"{BASE_V1}/dealFields", params={"api_token": API_KEY}, timeout=15)
+# ── PIPEDRIVE ────────────────────────────────────────────────
+def buscar_qualificador_id(nome):
+    resp = req.get(f"{BASE_V1}/dealFields",
+        params={"api_token": API_KEY}, timeout=15)
     resp.raise_for_status()
-    for field in (resp.json().get("data") or []):
+    fields = resp.json().get("data") or []
+    for field in fields:
         if field.get("key") == CF_QUALIFICADOR:
-            return {norm(opt.get("label", "")): str(opt.get("id")) for opt in (field.get("options") or [])}
-    return {}
+            for opt in (field.get("options") or []):
+                if norm(opt.get("label","")) == norm(nome):
+                    return str(opt.get("id"))
+    return None
 
-def buscar_deals_mes(mes, ano):
+def buscar_users():
+    resp = req.get(f"{BASE_V1}/users",
+        params={"api_token": API_KEY}, timeout=15)
+    resp.raise_for_status()
+    mapa = {}
+    for u in (resp.json().get("data") or []):
+        mapa[u["id"]] = u["name"]
+    return mapa
+
+def encontrar_user_id(users, nome):
+    for uid, uname in users.items():
+        if norm(uname) == norm(nome):
+            return uid
+    return None
+
+def buscar_deals():
     todos, start = [], 0
-    mes_str = f"{ano}-{mes:02d}"
     while True:
         resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS, "status": "won",
-            "sort": "won_time DESC", "limit": 500,
-            "start": start, "api_token": API_KEY,
+            "filter_id": FILTER_DEALS,
+            "limit": 500,
+            "start": start,
+            "api_token": API_KEY
         }, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         lote = data.get("data") or []
-        found_older = False
-        for deal in lote:
-            wt = str(deal.get("won_time", ""))[:7]
-            if wt == mes_str: todos.append(deal)
-            elif wt < mes_str: found_older = True
+        todos.extend(lote)
         mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote or found_older: break
+        if not mais or not lote:
+            break
         start += 500
     return todos
 
-def buscar_activities_mes(mes, ano):
+def buscar_activities():
     todos, cursor = [], None
-    mes_str = f"{ano}-{mes:02d}"
     while True:
         params = {"filter_id": FILTER_ACTIVITIES, "limit": 200}
-        if cursor: params["cursor"] = cursor
-        resp = req.get(f"{BASE_V2}/activities", params=params,
-                       headers={"x-api-token": API_KEY}, timeout=30)
+        if cursor:
+            params["cursor"] = cursor
+        resp = req.get(f"{BASE_V2}/activities",
+            params=params,
+            headers={"x-api-token": API_KEY},
+            timeout=30)
         resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for act in lote:
-            if str(act.get("due_date", ""))[:7] == mes_str:
-                todos.append(act)
+        data   = resp.json()
+        lote   = data.get("data") or []
+        todos.extend(lote)
         cursor = data.get("additional_data", {}).get("next_cursor")
-        if not cursor or not lote: break
+        if not cursor or not lote:
+            break
     return todos
 
-# ── CÁLCULO ───────────────────────────────────────────────────
-def calcular_abril(mes=None, ano=None, head_filter=None):
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
+def cf(deal, key):
+    val = deal.get(key)
+    if val is None:
+        return None
+    if isinstance(val, dict):
+        return val.get("value") or val.get("label")
+    return val
 
-    feriados  = buscar_feriados()
-    du_calc   = du_mes_total(ano, mes, feriados)
-    du_pass   = du_passados(ano, mes, feriados)
-    du_rest   = du_restantes(ano, mes, feriados)
+# ── CÁLCULO ──────────────────────────────────────────────────
+def calcular(nome, user_id, qualificador_id, colaborador, metas, ote, deals, activities):
 
-    colab_df   = buscar_colaboradores()
-    metas      = buscar_metas_todas(ano, mes)
-    users_pipe = buscar_users_pipe()
-    qual_ids   = buscar_qual_ids()
-    deals      = buscar_deals_mes(mes, ano)
-    activities = buscar_activities_mes(mes, ano)
+    deals_ganhos = [
+        d for d in deals
+        if d.get("status") == "won" and str(cf(d, CF_QUALIFICADOR)) == str(qualificador_id)
+    ]
 
-    # Coluna flexível
-    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
+    valor_bruto = sum(float(d.get("value") or 0) for d in deals_ganhos)
+    valor_multi = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_ganhos)
 
-    # Mapas
-    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
-
-    nome_to_subarea = {}
-    nome_to_head    = {}
-    nome_to_cargo   = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        hd  = str(row.get(head_col, "")).strip() if head_col else ""
-        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
-        nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = hd
-        nome_to_cargo[nn]   = cg
-
-    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
-
-    # Squads sem SDR — líderes desses squads vão para Closer, não SDR
-    SQUADS_SEM_SDR = {"latam", "orion"}
-
-    uid_to_nome      = {uid: name for uid, name in users_pipe.items()}
-    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
-    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
-
-    # Squads visíveis pelo head_filter
-    if head_filter is None:
-        squads_visiveis = None  # tudo
-    elif head_filter == "__none__":
-        squads_visiveis = set()  # nada
-    elif head_filter.startswith("__squad__:"):
-        sub_direto = norm(head_filter.replace("__squad__:", ""))
-        squads_visiveis = {sub_direto}
-    else:
-        head_nn = norm(head_filter)
-        squads_visiveis = set(
-            norm(sub) for nn, sub in nome_to_subarea.items()
-            if norm(nome_to_head.get(nn, "")) == head_nn and sub
-        )
-
-    def visivel(sub):
-        return squads_visiveis is None or norm(sub) in squads_visiveis
-
-    # ── Realizado por closer (owner) ──────────────────────────
-    closer_real = {}
-    for deal in deals:
-        owner_nome = norm(get_owner_name(deal))
-        if not owner_nome:
-            oid = get_owner_id(deal)
-            owner_nome = uid_to_nome_norm.get(oid, "")
-        if not owner_nome: continue
-        valor       = float(deal.get("value") or 0)
-        valor_multi = float(cf(deal, CF_MULTIPLICADOR) or 0)
-        if owner_nome not in closer_real:
-            closer_real[owner_nome] = {"valor": 0, "valor_multi": 0, "qtd": 0}
-        closer_real[owner_nome]["valor"]       += valor
-        closer_real[owner_nome]["valor_multi"] += valor_multi
-        closer_real[owner_nome]["qtd"]         += 1
-
-    # ── Atividades por owner ──────────────────────────────────
     mapa_rv = {d["id"]: cf(d, CF_REUNIAO_VALID) for d in deals}
-    acts_by_owner = {}
-    for act in activities:
-        oid = str(act.get("owner_id", ""))
-        acts_by_owner.setdefault(oid, []).append(act)
 
-    def act_valida(act):
-        if not (act.get("done") is True or act.get("status") == "done"): return False
-        rv = mapa_rv.get(act.get("deal_id"))
-        return rv is None or str(rv).strip() == "" or norm(str(rv)) == "sim"
+    hoje      = date.today()
+    mes_atual = hoje.strftime("%Y-%m")
 
-    # ── Metas por tipo ────────────────────────────────────────
-    du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
-    du_total = du_sheet if du_sheet > 0 else du_calc
+    acts_sdr = [
+        a for a in activities
+        if str(a.get("owner_id")) == str(user_id)
+        and str(a.get("due_date", ""))[:7] == mes_atual
+    ]
 
-    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
-    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
+    def rv_eh_valida(rv):
+        if rv is None or str(rv).strip() == "":
+            return True
+        s = str(rv)
+        return s == RV_SIM or norm(s) == "sim"
 
-    def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False):
-        mtd = safe_div(meta, du_total) * du_pass if du_total else 0
-        return {
-            "nome": nome, "meta": arred(meta), "is_head": is_head,
-            "dias_uteis": du_total, "meta_du": arred(safe_div(meta, du_total)),
-            "realizado": arred(real),
-            "pct_atingido": arred(safe_div(real, meta) * 100),
-            "mtd": arred(mtd), "deficit_mtd": arred(mtd - real),
-            "pct_mtd": arred(safe_div(real, mtd) * 100),
-            "deficit_meta": arred(meta - real),
-            "meta_dia_100": arred(safe_div(meta - real, du_rest)) if du_rest else 0,
-            "realizado_multi": arred(real_multi),
-            "pct_atingido_multi": arred(safe_div(real_multi, meta) * 100),
-            "deficit_meta_multi": arred(meta - real_multi),
-            "meta_dia_multi": arred(safe_div(meta - real_multi, du_rest)) if du_rest else 0,
-            "qtd_ganhos": qtd,
-            "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
-        }
+    def rv_eh_desq(rv):
+        if rv is None: return False
+        s = str(rv)
+        return s == RV_NAO or norm(s) == "nao"
 
-    # Coluna de líder
-    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+    def valida(a):
+        if not (a.get("done") == True or a.get("status") == "done"):
+            return False
+        rv = mapa_rv.get(a.get("deal_id"))
+        return rv_eh_valida(rv)
 
-    # Mapa: nome_norm -> é líder de alguém
-    lider_nomes = set()
-    if lider_col:
-        for _, row in colab_df.iterrows():
-            lider_nome = norm(str(row.get(lider_col, "")))
-            membro_nome = norm(str(row.get(nome_col, "")))
-            if lider_nome and lider_nome != membro_nome:
-                lider_nomes.add(lider_nome)
+    reu_realizadas = [a for a in acts_sdr if valida(a)]
+    reu_desq       = [a for a in acts_sdr
+                      if (a.get("done") == True or a.get("status") == "done")
+                      and rv_eh_desq(mapa_rv.get(a.get("deal_id")))]
 
-    # ── Organiza por Squad ─────────────────────────────────────
-    squads = {}  # sub -> {closers: [], sdrs: [], nome: sub}
+    qtd_agendadas  = len(acts_sdr)
+    qtd_realizadas = len(reu_realizadas)
 
-    def get_squad(sub):
-        if sub not in squads:
-            squads[sub] = {"nome": sub, "closers_ind": [], "sdrs_ind": [],
-                           "closer_total": None, "sdr_total": None}
-        return squads[sub]
+    pct_reu = (qtd_realizadas / metas["meta_reu"]) if metas["meta_reu"] > 0 else 0
+    pct_fin = (valor_multi / metas["meta_fin"])    if metas["meta_fin"] > 0 else 0
+    ating   = ((pct_reu + pct_fin) / 2) * 100
 
-    # Closers
-    for m in closers_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
-        ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
-        get_squad(sub)["closers_ind"].append(
-            build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"])
-        )
+    acel     = acelerador(ating)
+    comissao = ote["variavel"] * (ating / 100) * metas["rampagem"] * acel
 
-    # Heads e Líderes de closer no próprio squad
-    for uid, uname in users_pipe.items():
-        nn      = norm(uname)
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
-        if nn not in closer_real: continue
-        # é head ou líder de closer (líder sem meta de reunião)
-        is_head_of  = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
-        is_lider_of = nn in lider_nomes and nn not in team_leaders
-        # Team leader de squad sem SDR também vai pra closer
-        is_tl_sem_sdr = nn in team_leaders and norm(own_sub) in SQUADS_SEM_SDR
-        if not is_head_of and not is_lider_of and not is_tl_sem_sdr: continue
-        existing = [norm(c["nome"]) for c in squads.get(own_sub, {}).get("closers_ind", [])]
-        if nn in existing: continue
-        ri = closer_real[nn]
-        get_squad(own_sub)["closers_ind"].append(
-            build_closer_row(uname, 0, ri["valor"], ri["valor_multi"], ri["qtd"], is_head=True)
-        )
+    dp = dias_uteis_passados()
+    du = metas["dias_uteis"]
+    proj_fin      = (valor_multi / dp) * du
+    proj_reu      = (qtd_realizadas / dp) * du
+    pct_proj_fin  = (proj_fin / metas["meta_fin"] * 100) if metas["meta_fin"] > 0 else 0
+    pct_proj_reu  = (proj_reu / metas["meta_reu"] * 100)  if metas["meta_reu"] > 0 else 0
+    ating_proj    = (pct_proj_fin + pct_proj_reu) / 2
+    acel_proj     = acelerador(ating_proj)
+    comissao_proj = ote["variavel"] * (ating_proj / 100) * metas["rampagem"] * acel_proj
 
-    # SDRs
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
-        meta_reu = m["meta_reu"] / 10
-        meta_fin = m["meta_fin"]
-        uid      = nome_norm_to_uid.get(nn)
-        uid_str  = str(uid) if uid else ""
-        acts_sdr = acts_by_owner.get(uid_str, [])
-        validadas     = [a for a in acts_sdr if act_valida(a)]
-        qtd_val       = len(validadas)
-        deveria_estar = arred(safe_div(meta_reu, du_total) * du_pass)
-        pct_reu       = arred(safe_div(qtd_val, meta_reu) * 100)
-        qual_id       = qual_ids.get(nn)
-        deals_sdr     = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
-        qtd_ganhos    = len(deals_sdr)
-        valor_ganho   = sum(float(d.get("value") or 0) for d in deals_sdr)
-        valor_multi   = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
-        pct_ganhos    = arred(safe_div(valor_multi, meta_fin) * 100)
-        pct_final     = arred((pct_reu + pct_ganhos) / 2)
-        get_squad(sub)["sdrs_ind"].append({
-            "nome": m["nome"], "subarea": sub,
-            "meta_reuniao": meta_reu,
-            "meta_diaria": arred(safe_div(meta_reu, du_total)),
-            "validadas": qtd_val,
-            "deveria_estar": deveria_estar,
-            "faltam": arred(deveria_estar - qtd_val),
-            "pct_reu": pct_reu,
-            "meta_ganho": arred(meta_fin),
-            "qtd_ganhos": qtd_ganhos,
-            "valor_ganho": arred(valor_ganho),
-            "valor_ganho_multi": arred(valor_multi),
-            "pct_ganhos": pct_ganhos,
-            "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
-            "pct_final": pct_final,
-        })
+    def serie_acts(lista):
+        mapa = {}
+        for a in lista:
+            dt = str(a.get("due_date", ""))[:10]
+            if dt:
+                mapa[dt] = mapa.get(dt, 0) + 1
+        return [{"data": k, "qtd": v} for k, v in sorted(mapa.items())]
 
-    # ── Líderes de SDR sem meta mas com atividade/ganho ─────────
-    sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
-    for uid, uname in users_pipe.items():
-        nn = norm(uname)
-        if nn not in lider_nomes and nn not in team_leaders: continue
-        if nn in sdr_nomes_ja: continue
-        if nn not in team_leaders: continue  # não é team leader, não vai pra SDR
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
-        if norm(own_sub) in SQUADS_SEM_SDR: continue  # squad sem SDR, vai pra closer
+    def serie_deals(lista):
+        mapa = {}
+        for d in lista:
+            dt = str(d.get("won_time", ""))[:10]
+            if dt:
+                v = float(cf(d, CF_MULTIPLICADOR) or 0)
+                mapa[dt] = mapa.get(dt, 0) + v
+        return [{"data": k, "valor": v} for k, v in sorted(mapa.items())]
 
-        uid_str  = str(uid)
-        acts_sdr = acts_by_owner.get(uid_str, [])
-        validadas    = [a for a in acts_sdr if act_valida(a)]
-        qtd_val      = len(validadas)
+    proximas = sorted(
+        [a for a in acts_sdr if not (a.get("done") or a.get("status") == "done")],
+        key=lambda a: (a.get("due_date", ""), a.get("due_time", "") or "")
+    )[:10]
 
-        qual_id      = qual_ids.get(nn)
-        deals_sdr    = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
-        qtd_ganhos   = len(deals_sdr)
-        valor_ganho  = sum(float(d.get("value") or 0) for d in deals_sdr)
-        valor_multi  = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
-
-        if qtd_val == 0 and qtd_ganhos == 0: continue  # nada a mostrar
-
-        pct_final = 0.0  # sem meta, sem % calculado
-        get_squad(own_sub)["sdrs_ind"].append({
-            "nome": uname, "subarea": own_sub,
-            "is_lider": True,
-            "meta_reuniao": 0, "meta_diaria": 0,
-            "validadas": qtd_val, "deveria_estar": 0,
-            "faltam": 0, "pct_reu": 0,
-            "meta_ganho": 0,
-            "qtd_ganhos": qtd_ganhos,
-            "valor_ganho": arred(valor_ganho),
-            "valor_ganho_multi": arred(valor_multi),
-            "pct_ganhos": 0,
-            "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
-            "pct_final": pct_final,
-        })
-
-    # ── Totais por Squad ──────────────────────────────────────
-    def total_closers(ind):
-        if not ind: return None
-        t_meta = sum(c["meta"] for c in ind)
-        t_real = sum(c["realizado"] for c in ind)
-        t_multi= sum(c["realizado_multi"] for c in ind)
-        t_qtd  = sum(c["qtd_ganhos"] for c in ind)
-        return build_closer_row("TOTAL", t_meta, t_real, t_multi, t_qtd)
-
-    def total_sdrs(ind):
-        if not ind: return None
-        t_reu  = sum(s["meta_reuniao"] for s in ind)
-        t_val  = sum(s["validadas"] for s in ind)
-        t_dev  = sum(s["deveria_estar"] for s in ind)
-        t_mg   = sum(s["meta_ganho"] for s in ind)
-        t_ganho= sum(s["valor_ganho"] for s in ind)
-        t_multi= sum(s["valor_ganho_multi"] for s in ind)
-        t_qtd  = sum(s["qtd_ganhos"] for s in ind)
-        pct_r  = arred(safe_div(t_val, t_reu) * 100)
-        pct_g  = arred(safe_div(t_multi, t_mg) * 100)
-        return {
-            "nome": "TOTAL", "subarea": "",
-            "meta_reuniao": t_reu,
-            "meta_diaria": arred(safe_div(t_reu, du_total)),
-            "validadas": t_val, "deveria_estar": arred(t_dev),
-            "faltam": arred(t_dev - t_val),
-            "pct_reu": pct_r, "meta_ganho": arred(t_mg),
-            "qtd_ganhos": t_qtd, "valor_ganho": arred(t_ganho),
-            "valor_ganho_multi": arred(t_multi),
-            "pct_ganhos": pct_g,
-            "ticket_medio": arred(safe_div(t_ganho, t_qtd)) if t_qtd else 0,
-            "pct_final": arred((pct_r + pct_g) / 2),
-        }
-
-    # Agrupa squads LIC-* em "Licenciados"
-    squads_final = {}
-    lic_closers = []
-    lic_sdrs    = []
-    squads_final = {}
-    for sub, sq in squads.items():
-        if sub.upper().startswith("LIC"):
-            lic_closers.extend(sq["closers_ind"])
-            lic_sdrs.extend(sq["sdrs_ind"])
-        else:
-            squads_final[sub] = sq
-
-    if lic_closers or lic_sdrs:
-        squads_final["Licenciados"] = {
-            "nome": "Licenciados",
-            "closers_ind": lic_closers,
-            "sdrs_ind": lic_sdrs,
-        }
-
-    # ── Total consolidado ─────────────────────────────────────
-    all_closers_ind = [c for sq in squads_final.values() for c in sq["closers_ind"]]
-    all_sdrs_ind    = [s for sq in squads_final.values() for s in sq["sdrs_ind"]]
-    total_geral_c   = total_closers(all_closers_ind)
-    total_geral_s   = total_sdrs(all_sdrs_ind)
-
-    # ── Resultado por Squad (usando squads_final com LIC agrupado) ──
-    squads_result = []
-    for sub, sq in squads_final.items():
-        tc = total_closers(sq["closers_ind"])
-        ts = total_sdrs(sq["sdrs_ind"])
-        ating_closer = tc["pct_atingido_multi"] if tc else 0
-        ating_sdr    = ts["pct_final"] if ts else None
-        resultado    = arred((ating_closer + ating_sdr) / 2) if ating_sdr is not None else ating_closer
-        squads_result.append({
-            "nome": sq.get("nome", sub),
-            "ating_closer": arred(ating_closer),
-            "ating_sdr": arred(ating_sdr) if ating_sdr is not None else None,
-            "resultado": arred(resultado),
-            "tem_sdr": ts is not None,
-            # Closer values
-            "closer_bruto":  arred(tc["realizado"]) if tc else 0,
-            "closer_multi":  arred(tc["realizado_multi"]) if tc else 0,
-            "closer_vol":    tc["qtd_ganhos"] if tc else 0,
-            # SDR values
-            "sdr_bruto":     arred(ts["valor_ganho"]) if ts else 0,
-            "sdr_multi":     arred(ts["valor_ganho_multi"]) if ts else 0,
-            "sdr_reunioes":  ts["validadas"] if ts else 0,
-        })
-
-    # Serializa squads
-    squads_out = []
-    for sub, sq in squads_final.items():
-        tc = total_closers(sq["closers_ind"])
-        ts = total_sdrs(sq["sdrs_ind"])
-        squads_out.append({
-            "nome": sq.get("nome", sub),
-            "closers": sq["closers_ind"],
-            "closer_total": tc,
-            "sdrs": sq["sdrs_ind"],
-            "sdr_total": ts,
-        })
-
-    # ── Card consolidado Denise (Elite + Sniper + MGM/Olympus) ──
-    DENISE_SQUADS = {"elite", "sniper", "mgm", "olympus"}
-    denise_squads = [r for r in squads_result if norm(r["nome"]) in DENISE_SQUADS]
-    if denise_squads:
-        d_closer = arred(safe_div(
-            sum(sq["ating_closer"] for sq in denise_squads),
-            len(denise_squads)
-        ))
-        d_sdr_vals = [sq["ating_sdr"] for sq in denise_squads if sq["ating_sdr"] is not None]
-        d_sdr = arred(sum(d_sdr_vals) / len(d_sdr_vals)) if d_sdr_vals else None
-        d_resultado = arred((d_closer + d_sdr) / 2) if d_sdr is not None else d_closer
-        squads_result.append({
-            "nome": "Denise Mussolin",
-            "ating_closer": d_closer,
-            "ating_sdr": d_sdr,
-            "resultado": d_resultado,
-            "tem_sdr": d_sdr is not None,
-            "is_consolidated": True,
-            "closer_bruto":  arred(sum(sq.get("closer_bruto", 0) for sq in denise_squads)),
-            "closer_multi":  arred(sum(sq.get("closer_multi", 0) for sq in denise_squads)),
-            "closer_vol":    sum(sq.get("closer_vol", 0) for sq in denise_squads),
-            "sdr_bruto":     arred(sum(sq.get("sdr_bruto", 0) for sq in denise_squads)),
-            "sdr_multi":     arred(sum(sq.get("sdr_multi", 0) for sq in denise_squads)),
-            "sdr_reunioes":  sum(sq.get("sdr_reunioes", 0) for sq in denise_squads),
-        })
-
-    # Debug Larissa
-    larissa_nn = norm("Larissa Vitor")
-    _debug_larissa = {
-        "in_closer_real": larissa_nn in closer_real,
-        "in_team_leaders": larissa_nn in team_leaders,
-        "in_lider_nomes": larissa_nn in lider_nomes,
-        "own_sub": nome_to_subarea.get(larissa_nn, "NAO ENCONTRADO"),
-        "closer_real_value": closer_real.get(larissa_nn, "NAO ENCONTRADO"),
-        "nome_to_cargo": nome_to_cargo.get(larissa_nn, "NAO ENCONTRADO"),
-        "latam_closers": [c["nome"] for sq in squads.values() if norm(sq.get("nome","")) == "latam" or True for c in sq.get("closers_ind",[])],
-    }
+    foto = url_foto(nome)
 
     return {
-        "periodo": {
-            "mes": mes, "ano": ano,
-            "du_total": du_total, "du_passados": du_pass, "du_restantes": du_rest,
-            "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+        "colaborador": {**colaborador, "foto": foto},
+        "metas":       metas,
+        "ote":         ote,
+        "kpis": {
+            "reunioesAgendadas":  qtd_agendadas,
+            "reunioesRealizadas": qtd_realizadas,
+            "pctMetaReu":         arred(pct_reu * 100),
+            "valorBruto":         arred(valor_bruto),
+            "valorMultiplicador": arred(valor_multi),
+            "pctMetaFin":         arred(pct_fin * 100),
+            "pctDesqualificacao": arred(len(reu_desq) / qtd_realizadas * 100) if qtd_realizadas else 0,
         },
-        "squads": squads_out,
-        "resultados": squads_result,
-        "total_geral": {
-            "closer": total_geral_c,
-            "sdr": total_geral_s,
+        "comissao": {
+            "atingimento":   arred(ating),
+            "acelerador":    acel,
+            "estimada":      arred(comissao),
+            "comissionando": ating >= 60,
+            "projecao": {
+                "valorFin":    arred(proj_fin),
+                "qtdReu":      arred(proj_reu),
+                "atingimento": arred(ating_proj),
+                "estimada":    arred(comissao_proj),
+            }
         },
+        "graficos": {
+            "serieAgendadas":  serie_acts(acts_sdr),
+            "serieRealizadas": serie_acts(reu_realizadas),
+            "serieValores":    serie_deals(deals_ganhos),
+        },
+        "tabelas": {
+            "proximasReunioes": [{"deal_id": a.get("deal_id"), "nome": a.get("subject", ""), "data": a.get("due_date"), "hora": ajustar_hora(a.get("due_time"))} for a in proximas],
+            "reunioesGanhas":   [{"deal_id": d["id"], "nome": d.get("title"), "data_ganho": str(d.get("won_time", ""))[:10], "valor_bruto": float(d.get("value") or 0), "valor_multi": float(cf(d, CF_MULTIPLICADOR) or 0)} for d in deals_ganhos[:10]],
+            "reunioesDesq": [{
+                "deal_id":     a.get("deal_id"),
+                "proprietario": next((d.get("owner_name") or (d.get("user_id") or {}).get("name","") for d in deals if d["id"] == a.get("deal_id")), "--")
+            } for a in reu_desq[:10]],
+        },
+        "atualizadoEm": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
     }
 
-# ── ROTAS ─────────────────────────────────────────────────────
-@app.route("/")
-def index():
-    return redirect("/login" if "nome" not in session else "/abril")
-
+# ── ROTAS ────────────────────────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         usuario = request.form.get("usuario", "").strip()
-        senha   = request.form.get("senha",   "").strip()
+        senha   = request.form.get("senha", "").strip()
         nome    = buscar_usuario(usuario, senha)
         if nome:
             session["nome"] = nome
-            return redirect("/abril")
-        return render_template("login.html", erro="Usuário ou senha inválidos"), 401
-    return render_template("login.html", erro=None)
+            return redirect("/dashboard")
+        return send_from_directory(".", "login.html"), 401
+    return send_from_directory(".", "login.html")
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/login")
 
-@app.route("/abril")
-def abril():
+@app.route("/dashboard")
+def dashboard():
     if "nome" not in session:
         return redirect("/login")
-    return render_template("abril.html", nome=session["nome"])
+    return send_from_directory(".", "dashboard.html")
 
-@app.route("/api/abril")
-def api_abril():
+@app.route("/api/sdr")
+def api_sdr():
     if "nome" not in session:
         return jsonify({"erro": "Não autenticado"}), 401
+
+    nome = session["nome"]
     try:
-        mes  = request.args.get("mes", type=int)
-        ano  = request.args.get("ano", type=int)
-        nome_sess = session.get("nome", "")
+        colaborador = buscar_colaborador(nome)
+        if not colaborador:
+            return jsonify({"erro": f"'{nome}' nao encontrado ou inativo"}), 404
 
-        # Detecta gerente: quem não tem head (ou é head de si mesmo)
-        colab_df  = buscar_colaboradores()
-        head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
-        nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-        # Superusuários sempre veem tudo
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        nn_sess = norm(nome_sess)
+        metas = buscar_metas(nome)
+        if not metas:
+            return jsonify({"erro": f"Metas de '{nome}' nao encontradas para o mes atual"}), 404
 
-        if nn_sess in superusers:
-            # Superuser vê tudo
-            head_filter = None
-        else:
-            # Verifica se é Head
-            is_head = False
-            if head_col:
-                for _, row in colab_df.iterrows():
-                    if norm(str(row.get(head_col, ""))) == nn_sess:
-                        is_head = True
-                        break
+        ote = buscar_ote(colaborador["cargo"])
+        if not ote:
+            return jsonify({"erro": f"OTE nao encontrado para cargo '{colaborador['cargo']}'"}), 404
 
-            if is_head:
-                # Head vê os squads onde é Head
-                head_filter = nome_sess
-            else:
-                # Verifica se é Líder
-                lider_col_l = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                is_lider = False
-                lider_sub = None
-                if lider_col_l:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col_l, ""))) == nn_sess:
-                            sub = str(row.get(sub_col if (sub_col := next((c for c in colab_df.columns if norm(c) == "subarea"), None)) else "Subárea", "")).strip()
-                            if sub:
-                                lider_sub = sub
-                                is_lider = True
-                                break
+        users           = buscar_users()
+        user_id         = encontrar_user_id(users, nome)
+        if not user_id:
+            return jsonify({"erro": f"Usuario '{nome}' nao encontrado no Pipedrive"}), 404
 
-                if is_lider and lider_sub:
-                    # Líder vê só o próprio squad — usa squad_filter especial
-                    head_filter = f"__squad__:{lider_sub}"
-                else:
-                    # Pessoa sem cargo especial — não vê nada
-                    head_filter = "__none__"
-        return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano, head_filter=head_filter)))
+        deals           = buscar_deals()
+        activities      = buscar_activities()
+        qualificador_id = buscar_qualificador_id(nome)
+
+        resultado = calcular(nome, user_id, qualificador_id, colaborador, metas, ote, deals, activities)
+        return jsonify(resultado)
+
     except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+        return jsonify({"erro": str(e)}), 500
 
-@app.route("/api/debug/metas")
-def debug_metas():
-    if "nome" not in session:
-        return jsonify({"erro": "Não autenticado"}), 401
-    hoje = date.today()
-    df = ler_sheet(URL_METAS)
-    return jsonify({
-        "colunas": list(df.columns),
-        "primeiras_5_linhas": df.head(5).fillna("").to_dict(orient="records"),
-        "mes_ano": f"{hoje.month}/{hoje.year}",
-    })
+@app.route("/")
+def index():
+    return redirect("/login")
 
-@app.route("/api/debug/colab")
-def debug_colab():
-    if "nome" not in session:
-        return jsonify({"erro": "Não autenticado"}), 401
-    df = ler_sheet(URL_COLAB)
-    return jsonify({
-        "colunas": list(df.columns),
-        "primeiras_5_linhas": df.head(5).fillna("").to_dict(orient="records"),
-    })
-
+# ── MAIN ─────────────────────────────────────────────────────
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.getenv("PORT", 5050))
+    print(f"\n Board Academy — http://localhost:{port}")
     app.run(host="0.0.0.0", port=port, debug=False)
