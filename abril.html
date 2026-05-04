@@ -400,12 +400,15 @@ function renderResultados(resultados) {
     <div class="result-card${r.is_consolidated ? ' result-card-consolidated' : ''}">
       <div class="rc-nome">${r.nome}${r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' : ''}</div>
       <div class="rc-section-label">Closers</div>
+      <div class="rc-row"><span class="rc-label">Meta</span><span class="rc-val">${R(r.closer_meta)}</span></div>
       <div class="rc-row"><span class="rc-label">% c/ Multi</span><span>${pctBadge(r.ating_closer)}</span></div>
       <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.closer_bruto)}</span></div>
       <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.closer_multi)}</span></div>
       <div class="rc-row"><span class="rc-label">Vol. Ganhos</span><span class="rc-val">${N(r.closer_vol)}</span></div>
       ${r.tem_sdr ? `
       <div class="rc-section-label" style="margin-top:8px">SDR's</div>
+      <div class="rc-row"><span class="rc-label">Meta Reunião</span><span class="rc-val">${N(r.sdr_meta_reu)}</span></div>
+      <div class="rc-row"><span class="rc-label">Meta Financeira</span><span class="rc-val">${R(r.sdr_meta_fin)}</span></div>
       <div class="rc-row"><span class="rc-label">% Final</span><span>${pctBadge(r.ating_sdr)}</span></div>
       <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.sdr_bruto)}</span></div>
       <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.sdr_multi)}</span></div>
