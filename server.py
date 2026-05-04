@@ -393,6 +393,16 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             return False
         return True
 
+    # Pesos do atingimento SDR por período
+    # A partir de maio/2026: 70% reuniões, 30% financeiro
+    # Antes: 50% / 50%
+    if (ano > 2026) or (ano == 2026 and mes >= 5):
+        PESO_REU = 0.70
+        PESO_FIN = 0.30
+    else:
+        PESO_REU = 0.50
+        PESO_FIN = 0.50
+
     # ── Metas por tipo ────────────────────────────────────────
     du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
     du_total = du_sheet if du_sheet > 0 else du_calc
@@ -489,7 +499,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         valor_ganho   = sum(float(d.get("value") or 0) for d in deals_sdr)
         valor_multi   = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
         pct_ganhos    = arred(safe_div(valor_multi, meta_fin) * 100)
-        pct_final     = arred((pct_reu + pct_ganhos) / 2)
+        pct_final     = arred(pct_reu * PESO_REU + pct_ganhos * PESO_FIN)
         get_squad(sub)["sdrs_ind"].append({
             "nome": m["nome"], "subarea": sub,
             "meta_reuniao": meta_reu,
@@ -578,7 +588,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "valor_ganho_multi": arred(t_multi),
             "pct_ganhos": pct_g,
             "ticket_medio": arred(safe_div(t_ganho, t_qtd)) if t_qtd else 0,
-            "pct_final": arred((pct_r + pct_g) / 2),
+            "pct_final": arred(pct_r * PESO_REU + pct_g * PESO_FIN),
         }
 
     # Agrupa squads LIC-* em "Licenciados"
