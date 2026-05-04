@@ -818,6 +818,64 @@ def debug_colab():
         "primeiras_5_linhas": df.head(5).fillna("").to_dict(orient="records"),
     })
 
+
+@app.route("/api/exportar-ganhos")
+def exportar_ganhos():
+    if "nome" not in session:
+        return jsonify({"erro": "Não autenticado"}), 401
+    import csv, io
+    try:
+        mes = request.args.get("mes", type=int) or date.today().month
+        ano = request.args.get("ano", type=int) or date.today().year
+
+        deals = buscar_deals_mes(mes, ano)
+
+        # Busca pipeline names
+        resp_pipes = req.get(f"{BASE_V1}/pipelines", params={"api_token": API_KEY}, timeout=15)
+        pipes = {p["id"]: p["name"] for p in (resp_pipes.json().get("data") or [])}
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "ID", "Título", "Proprietário", "Squad", "Funil",
+            "Data Criação", "Data Ganho", "Valor Bruto", "Valor c/ Multiplicador"
+        ])
+
+        colab_df  = buscar_colaboradores(mes=mes, ano=ano)
+        sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+        nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+        nome_to_sub = {
+            norm(str(row.get(nome_col, ""))): str(row.get(sub_col, "")).strip()
+            for _, row in colab_df.iterrows()
+        } if sub_col else {}
+
+        for d in deals:
+            uid       = d.get("user_id")
+            owner     = uid.get("name", "") if isinstance(uid, dict) else ""
+            squad     = nome_to_sub.get(norm(owner), "")
+            pipeline  = pipes.get(d.get("pipeline_id"), "")
+            criacao   = str(d.get("add_time", ""))[:10]
+            ganho     = str(d.get("won_time", ""))[:10]
+            valor     = float(d.get("value") or 0)
+            multi     = float(cf(d, CF_MULTIPLICADOR) or 0)
+            writer.writerow([
+                d["id"], d.get("title", ""), owner, squad, pipeline,
+                criacao, ganho,
+                f"R$ {valor:,.0f}".replace(",", "."),
+                f"R$ {multi:,.0f}".replace(",", "."),
+            ])
+
+        output.seek(0)
+        from flask import Response
+        return Response(
+            "﻿" + output.getvalue(),  # BOM para Excel abrir UTF-8 corretamente
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=ganhos_{mes:02d}_{ano}.csv"}
+        )
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
