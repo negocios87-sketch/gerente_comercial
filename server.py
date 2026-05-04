@@ -194,6 +194,19 @@ def buscar_qual_ids():
             return {norm(opt.get("label", "")): str(opt.get("id")) for opt in (field.get("options") or [])}
     return {}
 
+
+def won_time_br(deal):
+    """Converte won_time de UTC para UTC-3 (horário de Brasília)"""
+    wt = deal.get("won_time", "")
+    if not wt:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(wt).replace("Z", "+00:00"))
+        dt_br = dt - timedelta(hours=3)
+        return dt_br.strftime("%Y-%m-%d %H:%M:%S")
+    except:
+        return str(wt)
+
 def buscar_deals_mes(mes, ano):
     todos, start = [], 0
     mes_str = f"{ano}-{mes:02d}"
@@ -208,9 +221,9 @@ def buscar_deals_mes(mes, ano):
         lote = data.get("data") or []
         found_older = False
         for deal in lote:
-            wt = str(deal.get("won_time", ""))[:7]
-            if wt == mes_str: todos.append(deal)
-            elif wt < mes_str: found_older = True
+            wt_br = won_time_br(deal)[:7]
+            if wt_br == mes_str: todos.append(deal)
+            elif wt_br < mes_str: found_older = True
         mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
         if not mais or not lote or found_older: break
         start += 500
@@ -855,7 +868,7 @@ def exportar_ganhos():
             squad     = nome_to_sub.get(norm(owner), "")
             pipeline  = pipes.get(d.get("pipeline_id"), "")
             criacao   = str(d.get("add_time", ""))[:10]
-            ganho     = str(d.get("won_time", ""))[:10]
+            ganho     = won_time_br(d)[:10]
             valor     = float(d.get("value") or 0)
             multi     = float(cf(d, CF_MULTIPLICADOR) or 0)
             writer.writerow([
