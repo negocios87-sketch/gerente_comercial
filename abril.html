@@ -193,6 +193,13 @@ const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Ag
 const FOTO_BASE = "https://raw.githubusercontent.com/negocios87-sketch/fotos_time_comercial/main/";
 
 // ── TABS ──────────────────────────────────────────────────────
+
+function exportarGanhos() {
+  const mes = document.getElementById('sel-mes')?.value || '';
+  const ano = document.getElementById('sel-ano')?.value || '';
+  window.location.href = `/api/exportar-ganhos?mes=${mes}&ano=${ano}`;
+}
+
 function setTab(tab) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['abril','forecast'][i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', ['panel-abril','panel-forecast'][i]===`panel-${tab}`));
