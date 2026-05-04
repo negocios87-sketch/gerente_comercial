@@ -287,8 +287,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     feriados  = buscar_feriados()
     du_calc   = du_mes_total(ano, mes, feriados)
-    du_pass   = du_passados(ano, mes, feriados)
-    du_rest   = du_restantes(ano, mes, feriados)
+    hoje      = date.today()
+    # Se o mês já passou completamente, du_passados = du_total e du_restantes = 0
+    if (ano < hoje.year) or (ano == hoje.year and mes < hoje.month):
+        du_pass = du_calc
+        du_rest = 0
+    else:
+        du_pass = du_passados(ano, mes, feriados)
+        du_rest = du_restantes(ano, mes, feriados)
 
     colab_df   = buscar_colaboradores(mes=mes, ano=ano)
     metas      = buscar_metas_todas(ano, mes)
