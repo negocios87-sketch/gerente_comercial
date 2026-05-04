@@ -104,9 +104,25 @@ def buscar_usuario(usuario, senha):
             return str(row.get("usuario", ""))
     return None
 
-def buscar_colaboradores():
+def buscar_colaboradores(mes=None, ano=None):
     df = ler_sheet(URL_COLAB)
     df.columns = [c.strip() for c in df.columns]
+
+    # Filtra por mês/ano de referência se as colunas existirem
+    mes_col = next((c for c in df.columns if "mes" in norm(c) and "ref" in norm(c)), None)
+    ano_col = next((c for c in df.columns if "ano" in norm(c) and "ref" in norm(c)), None)
+
+    if mes_col and ano_col and mes and ano:
+        def to_int(v):
+            try: return int(float(str(v)))
+            except: return 0
+        mask = (df[mes_col].apply(to_int) == mes) & (df[ano_col].apply(to_int) == ano)
+        df = df[mask].copy() if not df.empty else df
+        # Fallback: se não encontrar nenhuma linha, usa sem filtro
+        if df.empty:
+            df = ler_sheet(URL_COLAB)
+            df.columns = [c.strip() for c in df.columns]
+
     status_col = next((c for c in df.columns if "status" in norm(c)), None)
     if status_col:
         df = df[df[status_col].apply(lambda x: norm(str(x)) == "ativo")]
@@ -274,7 +290,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     du_pass   = du_passados(ano, mes, feriados)
     du_rest   = du_restantes(ano, mes, feriados)
 
-    colab_df   = buscar_colaboradores()
+    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
     metas      = buscar_metas_todas(ano, mes)
     users_pipe = buscar_users_pipe()
     qual_ids   = buscar_qual_ids()
