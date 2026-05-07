@@ -889,6 +889,179 @@ def exportar_ganhos():
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
 
+
+# ── FORECAST DIÁRIO ───────────────────────────────────────────
+FILTER_FORECAST = int(os.environ.get("FILTER_FORECAST", "1490240"))
+
+def buscar_deals_forecast():
+    """Busca todos os deals do filtro forecast (todos os status) via API v2"""
+    todos, cursor = [], None
+    users_pipe = buscar_users_pipe()
+    while True:
+        params = {"filter_id": FILTER_FORECAST, "limit": 500}
+        if cursor: params["cursor"] = cursor
+        resp = req.get(f"{BASE_V2}/deals", params=params,
+                       headers={"x-api-token": API_KEY}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        lote = data.get("data") or []
+        for deal in lote:
+            oid = deal.get("owner_id")
+            deal["owner_name"] = users_pipe.get(oid, "") if oid else ""
+        todos.extend(lote)
+        cursor = (data.get("additional_data") or {}).get("next_cursor")
+        if not cursor or not lote: break
+    return todos
+
+def calcular_forecast(head_filter=None):
+    from collections import defaultdict
+
+    colab_df  = buscar_colaboradores()
+    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
+
+    nome_to_subarea = {}
+    nome_to_head    = {}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        hd  = str(row.get(head_col, "")).strip() if head_col else ""
+        nome_to_subarea[nn] = sub
+        nome_to_head[nn]    = hd
+
+    # Squads visíveis
+    if head_filter and not head_filter.startswith("__"):
+        head_nn = norm(head_filter)
+        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
+                           if norm(nome_to_head.get(nn, "")) == head_nn and sub}
+    elif head_filter and head_filter.startswith("__squad__:"):
+        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
+    else:
+        squads_visiveis = None
+
+    deals = buscar_deals_forecast()
+
+    # Agrupa: subarea -> date -> { totais + closers: {nome: {...}} }
+    by_squad = defaultdict(lambda: defaultdict(lambda: {
+        "p20": 0.0, "p50": 0.0, "p70": 0.0,
+        "realizado": 0.0, "perda": 0.0,
+        "closers": defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0})
+    }))
+
+    for deal in deals:
+        date_fc = deal.get("expected_close_date")
+        if not date_fc: continue
+        owner     = (deal.get("owner_name") or "").strip()
+        owner_nn  = norm(owner)
+        subarea   = nome_to_subarea.get(owner_nn, "")
+        if not subarea: continue
+        if squads_visiveis and norm(subarea) not in squads_visiveis: continue
+
+        # Agrupa LIC-* em Licenciados
+        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
+
+        value       = float(deal.get("value") or 0)
+        probability = deal.get("probability")
+        status      = deal.get("status")
+
+        d = by_squad[sub_display][date_fc]
+        c = d["closers"][owner]
+
+        if probability == 20:
+            d["p20"] += value; c["p20"] += value
+        elif probability == 50:
+            d["p50"] += value; c["p50"] += value
+        elif probability == 70:
+            d["p70"] += value; c["p70"] += value
+
+        if status == "won":
+            d["realizado"] += value; c["realizado"] += value
+        elif status == "lost":
+            d["perda"] += value; c["perda"] += value
+
+    result = {}
+    for squad, days in by_squad.items():
+        rows = []
+        for dt in sorted(days.keys()):
+            d = days[dt]
+            media     = d["p20"]*0.20 + d["p50"]*0.50 + d["p70"]*0.70
+            em_aberto = d["p20"] + d["p50"] + d["p70"]
+            total_prev= em_aberto + d["realizado"] + d["perda"]
+            ating     = arred(d["realizado"] / total_prev * 100) if total_prev > 0 else None
+
+            closers_list = []
+            for cname, cv in d["closers"].items():
+                c_media = cv["p20"]*0.20 + cv["p50"]*0.50 + cv["p70"]*0.70
+                c_em_ab = cv["p20"] + cv["p50"] + cv["p70"]
+                c_total = c_em_ab + cv["realizado"] + cv["perda"]
+                c_ating = arred(cv["realizado"] / c_total * 100) if c_total > 0 else None
+                closers_list.append({
+                    "nome": cname,
+                    "p20": arred(cv["p20"]), "p50": arred(cv["p50"]), "p70": arred(cv["p70"]),
+                    "media": arred(c_media), "em_aberto": arred(c_em_ab),
+                    "realizado": arred(cv["realizado"]), "perda": arred(cv["perda"]),
+                    "total_previsto": arred(c_total), "atingimento": c_ating,
+                })
+            closers_list.sort(key=lambda x: -(x["realizado"] + x["media"]))
+
+            rows.append({
+                "dia": dt,
+                "p20": arred(d["p20"]), "p50": arred(d["p50"]), "p70": arred(d["p70"]),
+                "media": arred(media), "em_aberto": arred(em_aberto),
+                "realizado": arred(d["realizado"]), "perda": arred(d["perda"]),
+                "total_previsto": arred(total_prev), "atingimento": ating,
+                "closers": closers_list,
+            })
+
+        # Total do squad
+        t = {k: sum(r[k] for r in rows) for k in ["p20","p50","p70","media","em_aberto","realizado","perda","total_previsto"]}
+        t_ating = arred(t["realizado"] / t["total_previsto"] * 100) if t["total_previsto"] else None
+        result[squad] = {
+            "rows": rows,
+            "total": {**{k: arred(v) for k,v in t.items()}, "atingimento": t_ating}
+        }
+
+    return {
+        "squads": result,
+        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/api/forecast")
+def api_forecast():
+    if "nome" not in session:
+        return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        nome_sess = session.get("nome", "")
+        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
+        if norm(nome_sess) in superusers:
+            head_filter = None
+        else:
+            colab_df  = buscar_colaboradores()
+            head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
+            nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+            sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+            is_head   = head_col and any(
+                norm(str(row.get(head_col,""))) == norm(nome_sess)
+                for _, row in colab_df.iterrows()
+            )
+            if is_head:
+                head_filter = nome_sess
+            else:
+                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+                lider_sub = None
+                if lider_col:
+                    for _, row in colab_df.iterrows():
+                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
+                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
+                            break
+                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+
+        return jsonify(limpar_nans(calcular_forecast(head_filter=head_filter)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
