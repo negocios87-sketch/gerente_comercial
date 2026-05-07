@@ -489,6 +489,15 @@ async function fetchAbril() {
 
 
 // ── FORECAST ──────────────────────────────────────────────────
+function toggleFcCloser(gid) {
+  const grp = document.querySelector(`tr[data-fc-cgid="${gid}"]`);
+  const members = document.querySelectorAll(`tr[data-fc-cmid="${gid}"]`);
+  if (!grp) return;
+  const opening = !grp.classList.contains('fc-c-open');
+  grp.classList.toggle('fc-c-open', opening);
+  members.forEach(r => r.style.display = opening ? 'table-row' : 'none');
+}
+
 function toggleFcDay(gid) {
   const grp = document.querySelector(`[data-fc-gid="${gid}"]`);
   const members = document.querySelectorAll(`[data-fc-mid="${gid}"]`);
@@ -536,9 +545,11 @@ function renderForecast(data) {
       </tr>`;
 
       // Closer member rows (hidden by default)
-      (row.closers || []).forEach(c => {
-        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
-          <td style="padding-left:36px">
+      (row.closers || []).forEach((c, ci) => {
+        const cgid = `${gid}_c${ci}`;
+        const hasDeals = c.deals && c.deals.length > 0;
+        tbody += `<tr class="row-member${hasDeals ? ' row-group' : ''}" data-fc-mid="${gid}" ${hasDeals ? `data-fc-cgid="${cgid}" onclick="toggleFcCloser('${cgid}')"` : ''} style="display:none">
+          <td style="padding-left:${hasDeals ? '28px' : '36px'}">
             <div class="name-cell">${avatarHtml(c.nome)}<span style="color:var(--text-muted);font-size:11px">${c.nome}</span></div>
           </td>
           <td class="col-fc" style="font-size:11px">${R(c.p20)}</td>
@@ -551,6 +562,21 @@ function renderForecast(data) {
           <td class="col-fc" style="font-size:11px">${R(c.total_previsto)}</td>
           <td class="col-fc" style="font-size:11px">${pctBadgeFc(c.atingimento)}</td>
         </tr>`;
+        // Deal rows (hidden by default)
+        (c.deals || []).forEach(deal => {
+          const statusColor = deal.status === 'won' ? 'var(--green)' : deal.status === 'lost' ? 'var(--red)' : 'var(--text-muted)';
+          const statusLabel = deal.status === 'won' ? 'Ganho' : deal.status === 'lost' ? 'Perdido' : 'Aberto';
+          tbody += `<tr data-fc-cmid="${cgid}" style="display:none;background:#FAFBFE">
+            <td style="padding-left:52px;font-size:11px;font-weight:400;color:var(--text-muted)">
+              <a href="https://boardacademy.pipedrive.com/deal/${deal.id}" target="_blank" style="color:var(--gold);font-size:10px;margin-right:6px;text-decoration:none">#${deal.id}</a>${deal.titulo}
+            </td>
+            <td class="col-fc" style="font-size:10px;color:var(--text-muted)">${deal.probabilidade ? deal.probabilidade + '%' : '—'}</td>
+            <td class="col-fc" colspan="2" style="font-size:10px;color:${statusColor};font-weight:600">${statusLabel}</td>
+            <td class="col-fc" colspan="2"></td>
+            <td class="col-fc" style="font-size:11px;color:${statusColor};font-weight:600">${R(deal.valor)}</td>
+            <td class="col-fc" colspan="3"></td>
+          </tr>`;
+        });
       });
     });
 
