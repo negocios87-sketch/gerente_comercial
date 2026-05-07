@@ -40,6 +40,10 @@ def norm(s):
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
 
 SUPERUSERS_RAW = os.environ.get("SUPERUSERS", "farias souza")
+MASTERS_RAW   = os.environ.get("MASTERS", "rodrigo leira,matheus paz,farias souza")
+GITHUB_TOKEN  = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPO   = "negocios87-sketch/gerente_comercial"
+GITHUB_BRANCH = "main"
 
 def arred(v):
     try:
@@ -750,7 +754,7 @@ def logout():
 def abril():
     if "nome" not in session:
         return redirect("/login")
-    return render_template("abril.html", nome=session["nome"])
+    return render_template("abril.html", nome=session["nome"], is_master=is_master(session["nome"]))
 
 @app.route("/api/abril")
 def api_abril():
@@ -1070,6 +1074,211 @@ def api_forecast():
                 head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
 
         return jsonify(limpar_nans(calcular_forecast(head_filter=head_filter)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── HISTÓRICO / SNAPSHOT ──────────────────────────────────────
+def is_master(nome_sess):
+    masters = {norm(u.strip()) for u in MASTERS_RAW.split(",")}
+    return norm(nome_sess) in masters
+
+def github_get_file(path):
+    """Retorna (content_decoded, sha) ou (None, None) se não existir"""
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    resp = req.get(url, headers={
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }, timeout=15)
+    if resp.status_code == 404:
+        return None, None
+    resp.raise_for_status()
+    data = resp.json()
+    import base64
+    decoded = base64.b64decode(data["content"]).decode("utf-8")
+    return decoded, data["sha"]
+
+def github_put_file(path, content_str, sha=None, message="snapshot"):
+    """Cria ou atualiza arquivo no GitHub"""
+    import base64
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    body = {
+        "message": message,
+        "content": base64.b64encode(content_str.encode("utf-8")).decode("utf-8"),
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        body["sha"] = sha
+    resp = req.put(url, json=body, headers={
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+def calcular_snapshot():
+    """Grava deals abertos por squad/closer/dia com IDs e datas originais"""
+    import json
+    hoje_fc = date.today()
+    colab_df = buscar_colaboradores(mes=hoje_fc.month, ano=hoje_fc.year)
+    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+
+    nome_to_subarea = {}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        nome_to_subarea[nn] = sub
+
+    deals = buscar_deals_forecast()
+    users_pipe = buscar_users_pipe()
+
+    from collections import defaultdict
+    snapshot = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+
+    for deal in deals:
+        if deal.get("status") != "open": continue
+        date_fc = deal.get("expected_close_date")
+        if not date_fc: continue
+        owner    = (deal.get("owner_name") or "").strip()
+        owner_nn = norm(owner)
+        subarea  = nome_to_subarea.get(owner_nn, "")
+        if not subarea: continue
+        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
+        probability = deal.get("probability")
+        value       = float(deal.get("value") or 0)
+
+        snapshot[sub_display][date_fc][owner].append({
+            "id":          deal.get("id"),
+            "titulo":      deal.get("title", ""),
+            "valor":       arred(value),
+            "probabilidade": probability,
+            "expected_close_date_original": date_fc,
+        })
+
+    # Converte defaultdict para dict normal
+    result = {}
+    for squad, days in snapshot.items():
+        result[squad] = {}
+        for dt, closers in days.items():
+            result[squad][dt] = dict(closers)
+
+    return result
+
+def enriquecer_snapshot(snapshot_data):
+    """Consulta deals atuais e classifica em ganho/perdido/remanejado/aberto"""
+    deals_atuais = buscar_deals_forecast()
+    deal_map = {d["id"]: d for d in deals_atuais}
+
+    result = {}
+    for squad, days in snapshot_data.items():
+        result[squad] = {}
+        for dt, closers in days.items():
+            day_totals = {
+                "media_prevista": 0.0, "ganho": 0.0,
+                "perdido": 0.0, "remanejado": 0.0,
+                "closers": {}
+            }
+            for closer, deals_list in closers.items():
+                c_totals = {"media_prevista": 0.0, "ganho": 0.0, "perdido": 0.0, "remanejado": 0.0, "deals": []}
+                for d in deals_list:
+                    prob  = d.get("probabilidade") or 0
+                    valor = d.get("valor", 0)
+                    media = valor * (prob / 100)
+                    c_totals["media_prevista"] += media
+                    day_totals["media_prevista"] += media
+
+                    atual = deal_map.get(d["id"])
+                    if not atual:
+                        status_atual = "ganho"  # não aparece mais = assumimos ganho/arquivado
+                    else:
+                        status_atual = atual.get("status", "open")
+                        new_date     = atual.get("expected_close_date", "")
+                        if status_atual == "open" and new_date != d["expected_close_date_original"]:
+                            status_atual = "remanejado"
+
+                    c_totals[status_atual if status_atual in ("ganho","perdido","remanejado") else "ganho"] += valor
+                    day_totals[status_atual if status_atual in ("ganho","perdido","remanejado") else "ganho"] += valor
+                    c_totals["deals"].append({**d, "status_atual": status_atual})
+
+                day_totals["closers"][closer] = c_totals
+
+            total_prev = day_totals["media_prevista"]
+            day_totals["pct_atingimento"] = arred(day_totals["ganho"] / total_prev * 100) if total_prev else None
+            result[squad][dt] = day_totals
+
+    return result
+
+@app.route("/api/snapshot", methods=["POST"])
+def api_snapshot():
+    if "nome" not in session or not is_master(session["nome"]):
+        return jsonify({"erro": "Acesso negado"}), 403
+    try:
+        hoje_str = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d")
+        path     = f"snapshots/{hoje_str}.json"
+
+        existing, sha = github_get_file(path)
+        if existing:
+            return jsonify({"existe": True, "data": hoje_str})
+
+        import json
+        data = calcular_snapshot()
+        github_put_file(path, json.dumps(data, ensure_ascii=False, indent=2),
+                        sha=None, message=f"snapshot {hoje_str}")
+        return jsonify({"ok": True, "data": hoje_str})
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/api/snapshot/sobrepor", methods=["POST"])
+def api_snapshot_sobrepor():
+    if "nome" not in session or not is_master(session["nome"]):
+        return jsonify({"erro": "Acesso negado"}), 403
+    try:
+        hoje_str = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d")
+        path     = f"snapshots/{hoje_str}.json"
+        _, sha   = github_get_file(path)
+        import json
+        data = calcular_snapshot()
+        github_put_file(path, json.dumps(data, ensure_ascii=False, indent=2),
+                        sha=sha, message=f"snapshot {hoje_str} (sobreposto)")
+        return jsonify({"ok": True, "data": hoje_str})
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/api/historico")
+def api_historico():
+    if "nome" not in session or not is_master(session["nome"]):
+        return jsonify({"erro": "Acesso negado"}), 403
+    try:
+        import json
+        # Lista arquivos na pasta snapshots
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/snapshots"
+        resp = req.get(url, headers={
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }, timeout=15)
+        if resp.status_code == 404:
+            return jsonify({"snapshots": []})
+        resp.raise_for_status()
+        files = [f["name"].replace(".json","") for f in resp.json() if f["name"].endswith(".json")]
+        files.sort(reverse=True)
+
+        # Carrega todos os snapshots e enriquece com status atual
+        result = {}
+        for fname in files[:30]:  # máximo 30 dias
+            content_str, _ = github_get_file(f"snapshots/{fname}.json")
+            if content_str:
+                snap = json.loads(content_str)
+                result[fname] = enriquecer_snapshot(snap)
+
+        return jsonify(limpar_nans({
+            "snapshots": result,
+            "datas": files,
+            "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+        }))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
