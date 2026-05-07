@@ -531,17 +531,26 @@ function renderForecast(data) {
     rows.forEach((row, i) => {
       const gid = `fc_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
       // Day group row
-      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer">
-        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${row.dia}</td>
+      const todayStr = new Date().toISOString().slice(0,10);
+      const isPast    = row.dia < todayStr;
+      const isToday   = row.dia === todayStr;
+      const diaLabel  = row.dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
+      const pctCell   = row.atingimento != null
+        ? (isPast
+            ? `<span class="pct-badge pct-${row.atingimento>=100?'green':row.atingimento>=60?'amber':'red'} fc-past">${row.atingimento.toFixed(1)}%</span>`
+            : pctBadgeFc(row.atingimento))
+        : '—';
+      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer${isToday?';border-left:3px solid var(--gold)':''}">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
         <td class="col-fc">${R(row.p20)}</td>
         <td class="col-fc">${R(row.p50)}</td>
         <td class="col-fc">${R(row.p70)}</td>
-        <td class="col-fc val-real">${R(row.media)}</td>
-        <td class="col-fc">${R(row.em_aberto)}</td>
-        <td class="col-fc" style="color:${row.realizado>0?'var(--green)':'var(--text-muted)'}">${R(row.realizado)}</td>
-        <td class="col-fc" style="color:${row.perda>0?'var(--red)':'var(--text-muted)'}">${R(row.perda)}</td>
-        <td class="col-fc">${R(row.total_previsto)}</td>
-        <td class="col-fc">${pctBadgeFc(row.atingimento)}</td>
+        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(row.media)}</td>
+        <td class="col-fc fc-gray">${R(row.em_aberto)}</td>
+        <td class="col-fc fc-gray" style="color:${row.realizado>0?'var(--green)':'var(--text-muted)'} !important">${R(row.realizado)}</td>
+        <td class="col-fc fc-gray" style="color:${row.perda>0?'var(--red)':'var(--text-muted)'} !important">${R(row.perda)}</td>
+        <td class="col-fc fc-total-bold">${R(row.total_previsto)}</td>
+        <td class="col-fc">${pctCell}</td>
       </tr>`;
 
       // Closer member rows (hidden by default)
@@ -584,11 +593,11 @@ function renderForecast(data) {
     tbody += `<tr class="row-total">
       <td>TOTAL</td>
       <td>${R(tot.p20)}</td><td>${R(tot.p50)}</td><td>${R(tot.p70)}</td>
-      <td class="val-real">${R(tot.media)}</td>
-      <td>${R(tot.em_aberto)}</td>
+      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${R(tot.media)}</td>
+      <td style="color:var(--text-muted)">${R(tot.em_aberto)}</td>
       <td style="color:${tot.realizado>0?'var(--green)':'var(--text-muted)'}">${R(tot.realizado)}</td>
       <td style="color:${tot.perda>0?'var(--red)':'var(--text-muted)'}">${R(tot.perda)}</td>
-      <td>${R(tot.total_previsto)}</td>
+      <td style="font-weight:700;color:var(--navy)">${R(tot.total_previsto)}</td>
       <td>${pctBadgeFc(tot.atingimento)}</td>
     </tr>`;
 
@@ -604,9 +613,12 @@ function renderForecast(data) {
             <thead><tr>
               <th style="text-align:left;min-width:110px">Dia</th>
               <th>20%</th><th>50%</th><th>70%</th>
-              <th>Média Prev.</th><th>Em Aberto</th>
-              <th>Realizado</th><th>Perda</th>
-              <th>Total Prev.</th><th>% Ating.</th>
+              <th style="background:rgba(13,122,62,.15)">Média Prev.</th>
+              <th style="color:#9CA3AF">Em Aberto</th>
+              <th style="color:#9CA3AF">Realizado</th>
+              <th style="color:#9CA3AF">Perda</th>
+              <th style="color:#9CA3AF">Total Prev.</th>
+              <th>% Ating.</th>
             </tr></thead>
             <tbody>${tbody}</tbody>
           </table>
