@@ -978,17 +978,18 @@ def calcular_forecast(head_filter=None):
         if "deals" not in c: c["deals"] = []
         c["deals"].append(deal_info)
 
-        if probability == 20:
-            d["p20"] += value; c["p20"] += value
-        elif probability == 50:
-            d["p50"] += value; c["p50"] += value
-        elif probability == 70:
-            d["p70"] += value; c["p70"] += value
-
         if status == "won":
             d["realizado"] += value; c["realizado"] += value
         elif status == "lost":
             d["perda"] += value; c["perda"] += value
+        else:
+            # Só deals abertos entram nas probabilidades
+            if probability == 20:
+                d["p20"] += value; c["p20"] += value
+            elif probability == 50:
+                d["p50"] += value; c["p50"] += value
+            elif probability == 70:
+                d["p70"] += value; c["p70"] += value
 
     result = {}
     for squad, days in by_squad.items():
