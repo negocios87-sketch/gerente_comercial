@@ -175,6 +175,7 @@
 <div class="tab-bar">
   <div class="tab active" onclick="setTab('abril')" id="tab-abril">Abril 2026</div>
   <div class="tab" onclick="setTab('forecast')">Forecast Diário</div>
+  <div class="tab" id="tab-historico" style="display:none" onclick="setTab('historico')">Histórico</div>
 </div>
 
 <div class="main">
@@ -188,6 +189,12 @@
       <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast...</div></div>
     </div>
   </div>
+  <div class="panel" id="panel-historico">
+    <div id="historico-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -203,9 +210,12 @@ function exportarGanhos() {
 }
 
 function setTab(tab) {
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['abril','forecast'][i]===tab));
-  document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', ['panel-abril','panel-forecast'][i]===`panel-${tab}`));
+  const tabs   = ['abril','forecast','historico'];
+  const panels = ['panel-abril','panel-forecast','panel-historico'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
+  document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
   if (tab === 'forecast') fetchForecast();
+  if (tab === 'historico') fetchHistorico();
 }
 
 // ── FORMAT ────────────────────────────────────────────────────
@@ -540,7 +550,7 @@ function renderForecast(data) {
             ? `<span class="pct-badge pct-${row.atingimento>=100?'green':row.atingimento>=60?'amber':'red'} fc-past">${row.atingimento.toFixed(1)}%</span>`
             : pctBadgeFc(row.atingimento))
         : '—';
-      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer${isToday?';border-left:3px solid var(--gold)':''}">
+      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${isToday ? 'background:#FFFBEB !important;border-left:3px solid var(--gold);' : ''}">
         <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
         <td class="col-fc">${R(row.p20)}</td>
         <td class="col-fc">${R(row.p50)}</td>
@@ -627,7 +637,8 @@ function renderForecast(data) {
     </div>`;
   });
 
-  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;margin-top:8px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
+  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
+  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
   document.getElementById('forecast-content').innerHTML = html;
 }
 
@@ -651,8 +662,153 @@ const fcStyle = document.createElement('style');
 fcStyle.textContent = '.col-fc { text-align:right; white-space:nowrap; padding:10px 12px; } .row-group.fc-open td:first-child::before { transform:rotate(90deg); }';
 document.head.appendChild(fcStyle);
 
+
+// ── SNAPSHOT / HISTÓRICO ─────────────────────────────────────
+const IS_MASTER = {{ "true" if is_master else "false" }};
+
+async function salvarSnapshot(force=false) {
+  const url = force ? '/api/snapshot/sobrepor' : '/api/snapshot';
+  const res = await fetch(url, {method:'POST'});
+  const data = await res.json();
+  if (data.existe && !force) {
+    if (confirm(`Já existe um snapshot para hoje (${data.data}). Deseja sobrepor?`)) {
+      salvarSnapshot(true);
+    }
+    return;
+  }
+  if (data.ok) {
+    alert(`✅ Snapshot de ${data.data} salvo com sucesso!`);
+    fetchHistorico();
+  } else {
+    alert('Erro: ' + (data.erro || 'desconhecido'));
+  }
+}
+
+function renderHistorico(data) {
+  const snapshots = data.snapshots || {};
+  const datas = data.datas || [];
+
+  if (!datas.length) {
+    document.getElementById('historico-content').innerHTML =
+      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum snapshot encontrado. Salve o primeiro!</div></div>';
+    return;
+  }
+
+  // Collect all squads across all dates
+  const allSquads = [...new Set(datas.flatMap(d => Object.keys(snapshots[d] || {})))].sort();
+
+  let html = '';
+  allSquads.forEach(squad => {
+    // Collect all days for this squad across snapshots
+    const allDays = [...new Set(datas.flatMap(d => Object.keys((snapshots[d] || {})[squad] || {})))].sort();
+    if (!allDays.length) return;
+
+    let tbody = '';
+    allDays.forEach((dia, i) => {
+      // Find data for this day across all snapshots
+      const snapDate = datas.find(d => (snapshots[d] || {})[squad]?.[dia]);
+      if (!snapDate) return;
+      const row = snapshots[snapDate][squad][dia];
+      const gid = `h_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
+
+      const todayStr = new Date().toISOString().slice(0,10);
+      const isPast   = dia < todayStr;
+      const isToday  = dia === todayStr;
+      const diaLabel = dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
+
+      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${isToday?'background:#FFFBEB !important;border-left:3px solid var(--gold);':''}">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
+        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(row.media_prevista||0)}</td>
+        <td class="col-fc" style="color:var(--green);font-weight:600">${R(row.ganho||0)}</td>
+        <td class="col-fc" style="color:var(--red)">${R(row.perdido||0)}</td>
+        <td class="col-fc fc-gray">${R(row.remanejado||0)}</td>
+        <td class="col-fc fc-total-bold">${R((row.ganho||0)+(row.perdido||0)+(row.remanejado||0))}</td>
+        <td class="col-fc">${row.pct_atingimento != null ? pctBadgeFc(row.pct_atingimento) : '—'}</td>
+      </tr>`;
+
+      // Closer rows
+      Object.entries(row.closers || {}).forEach(([ cname, cv ], ci) => {
+        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
+          <td style="padding-left:36px"><div class="name-cell">${avatarHtml(cname)}<span style="color:var(--text-muted);font-size:11px">${cname}</span></div></td>
+          <td class="col-fc fc-media-val" style="font-size:11px;background:rgba(13,122,62,.03)">${R(cv.media_prevista||0)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--green)">${R(cv.ganho||0)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--red)">${R(cv.perdido||0)}</td>
+          <td class="col-fc fc-gray" style="font-size:11px">${R(cv.remanejado||0)}</td>
+          <td class="col-fc" style="font-size:11px">${R((cv.ganho||0)+(cv.perdido||0)+(cv.remanejado||0))}</td>
+          <td class="col-fc" style="font-size:11px">—</td>
+        </tr>`;
+      });
+    });
+
+    // Total row
+    const totG = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].ganho||0):0); }, 0);
+    const totP = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].perdido||0):0); }, 0);
+    const totR = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].remanejado||0):0); }, 0);
+    const totM = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].media_prevista||0):0); }, 0);
+    const totPct = totM > 0 ? arred(totG/totM*100) : null;
+
+    tbody += `<tr class="row-total">
+      <td>TOTAL</td>
+      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${R(totM)}</td>
+      <td style="color:var(--green);font-weight:700">${R(totG)}</td>
+      <td style="color:var(--red)">${R(totP)}</td>
+      <td style="color:var(--text-muted)">${R(totR)}</td>
+      <td style="font-weight:700;color:var(--navy)">${R(totG+totP+totR)}</td>
+      <td>${totPct!=null?pctBadgeFc(totPct):'—'}</td>
+    </tr>`;
+
+    html += `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${squad}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:110px">Dia</th>
+              <th style="background:rgba(13,122,62,.15)">Média Prevista</th>
+              <th style="color:#6EE7B7">Ganho</th>
+              <th style="color:#FCA5A5">Perdido</th>
+              <th style="color:#9CA3AF">Remanejado</th>
+              <th>Total Previsto</th>
+              <th>% Ating.</th>
+            </tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
+  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
+  document.getElementById('historico-content').innerHTML = html;
+}
+
+async function fetchHistorico() {
+  document.getElementById('historico-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>';
+  try {
+    const res = await fetch('/api/historico');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderHistorico(data);
+  } catch(e) {
+    document.getElementById('historico-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+function arred(v) { try { return Math.round(parseFloat(v) * 100) / 100; } catch(e) { return 0; } }
+
 // Init
 const hoje = new Date();
+if (IS_MASTER) {
+  document.getElementById('tab-historico').style.display = '';
+}
 document.getElementById('sel-mes').value = hoje.getMonth() + 1;
 fetchAbril();
 setInterval(fetchAbril, 5 * 60 * 1000);
