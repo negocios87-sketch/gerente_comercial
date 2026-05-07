@@ -184,7 +184,9 @@
     </div>
   </div>
   <div class="panel" id="panel-forecast">
-    <div class="card"><div class="loading" style="color:#9CA3AF">Em construção.</div></div>
+    <div id="forecast-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast...</div></div>
+    </div>
   </div>
 </div>
 
@@ -203,6 +205,7 @@ function exportarGanhos() {
 function setTab(tab) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['abril','forecast'][i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', ['panel-abril','panel-forecast'][i]===`panel-${tab}`));
+  if (tab === 'forecast') fetchForecast();
 }
 
 // ── FORMAT ────────────────────────────────────────────────────
@@ -483,6 +486,132 @@ async function fetchAbril() {
       `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
   }
 }
+
+
+// ── FORECAST ──────────────────────────────────────────────────
+function toggleFcDay(gid) {
+  const grp = document.querySelector(`[data-fc-gid="${gid}"]`);
+  const members = document.querySelectorAll(`[data-fc-mid="${gid}"]`);
+  const closing = !grp.classList.contains('fc-open');
+  grp.classList.toggle('fc-open', closing);
+  members.forEach(r => r.style.display = closing ? 'table-row' : 'none');
+}
+
+function pctBadgeFc(pct) {
+  if (pct == null) return '<span style="color:var(--text-muted)">—</span>';
+  const cls = pct >= 100 ? 'pct-green' : pct >= 60 ? 'pct-amber' : 'pct-red';
+  return `<span class="pct-badge ${cls}">${pct.toFixed(1)}%</span>`;
+}
+
+function renderForecast(data) {
+  const squads = data.squads || {};
+  if (!Object.keys(squads).length) {
+    document.getElementById('forecast-content').innerHTML =
+      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum dado encontrado.</div></div>';
+    return;
+  }
+
+  const COLS = ['Dia','20%','50%','70%','Média Prev.','Em Aberto','Realizado','Perda','Total Prev.','% Ating.'];
+
+  let html = '';
+  Object.entries(squads).forEach(([squad, sq]) => {
+    const rows = sq.rows || [];
+    const tot  = sq.total || {};
+    let tbody = '';
+
+    rows.forEach((row, i) => {
+      const gid = `fc_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
+      // Day group row
+      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${row.dia}</td>
+        <td class="col-fc">${R(row.p20)}</td>
+        <td class="col-fc">${R(row.p50)}</td>
+        <td class="col-fc">${R(row.p70)}</td>
+        <td class="col-fc val-real">${R(row.media)}</td>
+        <td class="col-fc">${R(row.em_aberto)}</td>
+        <td class="col-fc" style="color:${row.realizado>0?'var(--green)':'var(--text-muted)'}">${R(row.realizado)}</td>
+        <td class="col-fc" style="color:${row.perda>0?'var(--red)':'var(--text-muted)'}">${R(row.perda)}</td>
+        <td class="col-fc">${R(row.total_previsto)}</td>
+        <td class="col-fc">${pctBadgeFc(row.atingimento)}</td>
+      </tr>`;
+
+      // Closer member rows (hidden by default)
+      (row.closers || []).forEach(c => {
+        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
+          <td style="padding-left:36px">
+            <div class="name-cell">${avatarHtml(c.nome)}<span style="color:var(--text-muted);font-size:11px">${c.nome}</span></div>
+          </td>
+          <td class="col-fc" style="font-size:11px">${R(c.p20)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.p50)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.p70)}</td>
+          <td class="col-fc val-real" style="font-size:11px">${R(c.media)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.em_aberto)}</td>
+          <td class="col-fc" style="font-size:11px;color:${c.realizado>0?'var(--green)':'var(--text-muted)'}">${R(c.realizado)}</td>
+          <td class="col-fc" style="font-size:11px;color:${c.perda>0?'var(--red)':'var(--text-muted)'}">${R(c.perda)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.total_previsto)}</td>
+          <td class="col-fc" style="font-size:11px">${pctBadgeFc(c.atingimento)}</td>
+        </tr>`;
+      });
+    });
+
+    // Total row
+    tbody += `<tr class="row-total">
+      <td>TOTAL</td>
+      <td>${R(tot.p20)}</td><td>${R(tot.p50)}</td><td>${R(tot.p70)}</td>
+      <td class="val-real">${R(tot.media)}</td>
+      <td>${R(tot.em_aberto)}</td>
+      <td style="color:${tot.realizado>0?'var(--green)':'var(--text-muted)'}">${R(tot.realizado)}</td>
+      <td style="color:${tot.perda>0?'var(--red)':'var(--text-muted)'}">${R(tot.perda)}</td>
+      <td>${R(tot.total_previsto)}</td>
+      <td>${pctBadgeFc(tot.atingimento)}</td>
+    </tr>`;
+
+    html += `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${squad}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:110px">Dia</th>
+              <th>20%</th><th>50%</th><th>70%</th>
+              <th>Média Prev.</th><th>Em Aberto</th>
+              <th>Realizado</th><th>Perda</th>
+              <th>Total Prev.</th><th>% Ating.</th>
+            </tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;margin-top:8px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
+  document.getElementById('forecast-content').innerHTML = html;
+}
+
+async function fetchForecast() {
+  document.getElementById('forecast-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast...</div></div>';
+  try {
+    const res = await fetch('/api/forecast');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderForecast(data);
+  } catch(e) {
+    document.getElementById('forecast-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+// Add CSS for fc columns
+const fcStyle = document.createElement('style');
+fcStyle.textContent = '.col-fc { text-align:right; white-space:nowrap; padding:10px 12px; } .row-group.fc-open td:first-child::before { transform:rotate(90deg); }';
+document.head.appendChild(fcStyle);
 
 // Init
 const hoje = new Date();
