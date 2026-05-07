@@ -968,6 +968,16 @@ def calcular_forecast(head_filter=None):
         d = by_squad[sub_display][date_fc]
         c = d["closers"][owner]
 
+        deal_info = {
+            "id":          deal.get("id"),
+            "titulo":      deal.get("title", ""),
+            "valor":       arred(value),
+            "probabilidade": probability,
+            "status":      status,
+        }
+        if "deals" not in c: c["deals"] = []
+        c["deals"].append(deal_info)
+
         if probability == 20:
             d["p20"] += value; c["p20"] += value
         elif probability == 50:
@@ -1002,6 +1012,7 @@ def calcular_forecast(head_filter=None):
                     "media": arred(c_media), "em_aberto": arred(c_em_ab),
                     "realizado": arred(cv["realizado"]), "perda": arred(cv["perda"]),
                     "total_previsto": arred(c_total), "atingimento": c_ating,
+                    "deals": cv.get("deals", []),
                 })
             closers_list.sort(key=lambda x: -(x["realizado"] + x["media"]))
 
