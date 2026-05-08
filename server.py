@@ -1146,6 +1146,8 @@ def calcular_snapshot():
         if deal.get("status") != "open": continue
         date_fc = deal.get("expected_close_date")
         if not date_fc: continue
+        # Snapshot só grava deals previstos para HOJE
+        if date_fc != hoje_fc.strftime("%Y-%m-%d"): continue
         owner    = (deal.get("owner_name") or "").strip()
         owner_nn = norm(owner)
         subarea  = nome_to_subarea.get(owner_nn, "")
