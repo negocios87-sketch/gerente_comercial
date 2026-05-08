@@ -954,7 +954,12 @@ def calcular_forecast(head_filter=None):
     }))
 
     for deal in deals:
-        date_fc = deal.get("expected_close_date")
+        status = deal.get("status")
+        # Deals ganhos usam a data de ganho; os demais usam expected_close_date
+        if status == "won":
+            date_fc = str(deal.get("won_time") or deal.get("close_time") or "")[:10]
+        else:
+            date_fc = deal.get("expected_close_date")
         if not date_fc: continue
         owner     = (deal.get("owner_name") or "").strip()
         owner_nn  = norm(owner)
