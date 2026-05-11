@@ -694,66 +694,56 @@ function renderHistorico(data) {
     return;
   }
 
-  // Collect all squads across all dates
   const allSquads = [...new Set(datas.flatMap(d => Object.keys(snapshots[d] || {})))].sort();
 
   let html = '';
   allSquads.forEach(squad => {
-    // Collect all days for this squad across snapshots
     const allDays = [...new Set(datas.flatMap(d => Object.keys((snapshots[d] || {})[squad] || {})))].sort();
     if (!allDays.length) return;
 
     let tbody = '';
     allDays.forEach((dia, i) => {
-      // Find data for this day across all snapshots
       const snapDate = datas.find(d => (snapshots[d] || {})[squad]?.[dia]);
       if (!snapDate) return;
       const row = snapshots[snapDate][squad][dia];
       const gid = `h_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
 
       const todayStr = new Date().toISOString().slice(0,10);
-      const isPast   = dia < todayStr;
       const isToday  = dia === todayStr;
       const diaLabel = dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
 
+      const media     = row.media_prevista || 0;
+      const realizada = row.ganho || 0;
+      const pctAting  = media > 0 ? arred(realizada / media * 100) : null;
+
       tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${isToday?'background:#FFFBEB !important;border-left:3px solid var(--gold);':''}">
         <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
-        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(row.media_prevista||0)}</td>
-        <td class="col-fc" style="color:var(--green);font-weight:600">${R(row.ganho||0)}</td>
-        <td class="col-fc" style="color:var(--red)">${R(row.perdido||0)}</td>
-        <td class="col-fc fc-gray">${R(row.remanejado||0)}</td>
-        <td class="col-fc fc-total-bold">${R((row.ganho||0)+(row.perdido||0)+(row.remanejado||0))}</td>
-        <td class="col-fc">${row.pct_atingimento != null ? pctBadgeFc(row.pct_atingimento) : '—'}</td>
+        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(media)}</td>
+        <td class="col-fc" style="color:var(--green);font-weight:600">${R(realizada)}</td>
+        <td class="col-fc">${pctAting != null ? pctBadgeFc(pctAting) : '—'}</td>
       </tr>`;
 
-      // Closer rows
-      Object.entries(row.closers || {}).forEach(([ cname, cv ], ci) => {
+      Object.entries(row.closers || {}).forEach(([ cname, cv ]) => {
+        const cMedia     = cv.media_prevista || 0;
+        const cRealizada = cv.ganho || 0;
+        const cPct       = cMedia > 0 ? arred(cRealizada / cMedia * 100) : null;
         tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
           <td style="padding-left:36px"><div class="name-cell">${avatarHtml(cname)}<span style="color:var(--text-muted);font-size:11px">${cname}</span></div></td>
-          <td class="col-fc fc-media-val" style="font-size:11px;background:rgba(13,122,62,.03)">${R(cv.media_prevista||0)}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--green)">${R(cv.ganho||0)}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--red)">${R(cv.perdido||0)}</td>
-          <td class="col-fc fc-gray" style="font-size:11px">${R(cv.remanejado||0)}</td>
-          <td class="col-fc" style="font-size:11px">${R((cv.ganho||0)+(cv.perdido||0)+(cv.remanejado||0))}</td>
-          <td class="col-fc" style="font-size:11px">—</td>
+          <td class="col-fc fc-media-val" style="font-size:11px;background:rgba(13,122,62,.03)">${R(cMedia)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--green)">${R(cRealizada)}</td>
+          <td class="col-fc" style="font-size:11px">${cPct != null ? pctBadgeFc(cPct) : '—'}</td>
         </tr>`;
       });
     });
 
-    // Total row
-    const totG = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].ganho||0):0); }, 0);
-    const totP = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].perdido||0):0); }, 0);
-    const totR = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].remanejado||0):0); }, 0);
     const totM = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].media_prevista||0):0); }, 0);
+    const totG = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].ganho||0):0); }, 0);
     const totPct = totM > 0 ? arred(totG/totM*100) : null;
 
     tbody += `<tr class="row-total">
       <td>TOTAL</td>
       <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${R(totM)}</td>
       <td style="color:var(--green);font-weight:700">${R(totG)}</td>
-      <td style="color:var(--red)">${R(totP)}</td>
-      <td style="color:var(--text-muted)">${R(totR)}</td>
-      <td style="font-weight:700;color:var(--navy)">${R(totG+totP+totR)}</td>
       <td>${totPct!=null?pctBadgeFc(totPct):'—'}</td>
     </tr>`;
 
@@ -769,11 +759,8 @@ function renderHistorico(data) {
             <thead><tr>
               <th style="text-align:left;min-width:110px">Dia</th>
               <th style="background:rgba(13,122,62,.15)">Média Prevista</th>
-              <th style="color:#6EE7B7">Ganho</th>
-              <th style="color:#FCA5A5">Perdido</th>
-              <th style="color:#9CA3AF">Remanejado</th>
-              <th>Total Previsto</th>
-              <th>% Ating.</th>
+              <th style="color:#6EE7B7">Realizada</th>
+              <th>% Atingimento</th>
             </tr></thead>
             <tbody>${tbody}</tbody>
           </table>
@@ -786,7 +773,6 @@ function renderHistorico(data) {
   html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
   document.getElementById('historico-content').innerHTML = html;
 }
-
 async function fetchHistorico() {
   document.getElementById('historico-content').innerHTML =
     '<div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>';
