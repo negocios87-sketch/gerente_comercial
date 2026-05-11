@@ -176,6 +176,7 @@
   <div class="tab active" onclick="setTab('abril')" id="tab-abril">Abril 2026</div>
   <div class="tab" onclick="setTab('forecast')">Forecast Diário</div>
   <div class="tab" id="tab-historico" style="display:none" onclick="setTab('historico')">Histórico</div>
+  <div class="tab" onclick="setTab('forecast-reunioes')">Forecast de Reuniões</div>
 </div>
 
 <div class="main">
@@ -194,6 +195,11 @@
       <div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>
     </div>
   </div>
+  <div class="panel" id="panel-forecast-reunioes">
+    <div id="fr-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast de reuniões...</div></div>
+    </div>
+  </div>
 
 </div>
 
@@ -210,12 +216,13 @@ function exportarGanhos() {
 }
 
 function setTab(tab) {
-  const tabs   = ['abril','forecast','historico'];
-  const panels = ['panel-abril','panel-forecast','panel-historico'];
+  const tabs   = ['abril','forecast','historico','forecast-reunioes'];
+  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
   if (tab === 'forecast') fetchForecast();
   if (tab === 'historico') fetchHistorico();
+  if (tab === 'forecast-reunioes') fetchForecastReunioes();
 }
 
 // ── FORMAT ────────────────────────────────────────────────────
@@ -791,6 +798,141 @@ async function fetchHistorico() {
 }
 
 function arred(v) { try { return Math.round(parseFloat(v) * 100) / 100; } catch(e) { return 0; } }
+
+
+// ── FORECAST DE REUNIÕES ─────────────────────────────────────
+function toggleFrDay(gid) {
+  const grp = document.querySelector(`tr[data-fr-gid="${gid}"]`);
+  const members = document.querySelectorAll(`tr[data-fr-mid="${gid}"]`);
+  if (!grp) return;
+  const opening = !grp.classList.contains('fr-open');
+  grp.classList.toggle('fr-open', opening);
+  members.forEach(r => r.style.display = opening ? 'table-row' : 'none');
+}
+
+function renderForecastReunioes(data) {
+  const squads = data.squads || {};
+  if (!Object.keys(squads).length) {
+    document.getElementById('fr-content').innerHTML =
+      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum dado encontrado.</div></div>';
+    return;
+  }
+
+  const todayStr = new Date().toISOString().slice(0,10);
+  let html = '';
+
+  Object.entries(squads).forEach(([squad, sq]) => {
+    const rows = sq.rows || [];
+    const tot  = sq.total  || {};
+    let tbody = '';
+
+    rows.forEach((row, i) => {
+      const gid = `fr_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
+      const isPast   = row.dia < todayStr;
+      const isToday  = row.dia === todayStr;
+      const diaLabel = row.dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
+      const pctCell  = row.pct != null ? pctBadgeFc(row.pct) : '—';
+      const nsCell   = row.no_show != null ? `<span style="color:var(--red)">${N(row.no_show)}</span>` : '—';
+      const gapCell  = row.gap > 0 ? `<span style="color:var(--red)">${N(row.gap)}</span>` : `<span style="color:var(--green)">${N(Math.abs(row.gap))}</span>`;
+
+      tbody += `<tr class="row-group fr-open" data-fr-gid="${gid}" onclick="toggleFrDay('${gid}')" style="cursor:pointer;${isToday?'background:#FFFBEB !important;border-left:3px solid var(--gold);':''}">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
+        <td class="col-fc" style="background:rgba(13,122,62,.05);color:var(--green);font-weight:600">${N(row.prevista)}</td>
+        <td class="col-fc">${N(row.ag_no_dia)}</td>
+        <td class="col-fc" style="color:var(--text-muted)">${N(row.ag_p_outros)}</td>
+        <td class="col-fc" style="color:var(--green)">${N(row.realizada)}</td>
+        <td class="col-fc">${nsCell}</td>
+        <td class="col-fc">${gapCell}</td>
+        <td class="col-fc">${pctCell}</td>
+      </tr>`;
+
+      // SDR rows (visible by default)
+      (row.sdrs || []).forEach(s => {
+        const sNomeLbl = s.is_lider ? `${s.nome} <span class="badge-lider">LÍDER</span>` : s.nome;
+        const sNs   = s.no_show != null ? `<span style="color:var(--red);font-size:11px">${N(s.no_show)}</span>` : '—';
+        const sGap  = s.gap > 0 ? `<span style="color:var(--red);font-size:11px">${N(s.gap)}</span>` : `<span style="color:var(--green);font-size:11px">${N(Math.abs(s.gap))}</span>`;
+        tbody += `<tr class="row-member" data-fr-mid="${gid}" style="display:table-row">
+          <td style="padding-left:32px">
+            <div class="name-cell">${avatarHtml(s.nome)}<span style="font-size:11px">${sNomeLbl}</span></div>
+          </td>
+          <td class="col-fc" style="font-size:11px;background:rgba(13,122,62,.03);color:var(--green)">${N(s.prevista)}</td>
+          <td class="col-fc" style="font-size:11px">${N(s.ag_no_dia)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--text-muted)">${N(s.ag_p_outros)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--green)">${N(s.realizada)}</td>
+          <td class="col-fc" style="font-size:11px">${sNs}</td>
+          <td class="col-fc" style="font-size:11px">${sGap}</td>
+          <td class="col-fc" style="font-size:11px">${s.pct != null ? pctBadgeFc(s.pct) : '—'}</td>
+        </tr>`;
+      });
+    });
+
+    // Total row
+    const tGap = tot.gap > 0 ? `<span style="color:var(--red)">${N(tot.gap)}</span>` : `<span style="color:var(--green)">${N(Math.abs(tot.gap||0))}</span>`;
+    tbody += `<tr class="row-total">
+      <td>TOTAL</td>
+      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${N(tot.prevista||0)}</td>
+      <td>${N(tot.ag_no_dia||0)}</td>
+      <td style="color:var(--text-muted)">${N(tot.ag_p_outros||0)}</td>
+      <td style="color:var(--green);font-weight:700">${N(tot.realizada||0)}</td>
+      <td>—</td>
+      <td>${tGap}</td>
+      <td>${tot.pct!=null?pctBadgeFc(tot.pct):'—'}</td>
+    </tr>`;
+
+    html += `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${squad}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:120px">Dia</th>
+              <th style="background:rgba(13,122,62,.15)">Prevista</th>
+              <th>Ag. no Dia</th>
+              <th style="color:#9CA3AF">Ag. p/ Outros</th>
+              <th style="color:#6EE7B7">Realizada</th>
+              <th style="color:#FCA5A5">No Show</th>
+              <th>Gap</th>
+              <th>% Ating.</th>
+            </tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;margin-top:8px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
+  document.getElementById('fr-content').innerHTML = html;
+
+  // Add CSS for fr rows open arrow
+  if (!document.getElementById('fr-style')) {
+    const s = document.createElement('style');
+    s.id = 'fr-style';
+    s.textContent = '.row-group.fr-open td:first-child::before { transform:rotate(0deg); } .row-group:not(.fr-open) td:first-child::before { transform:rotate(-90deg); }';
+    document.head.appendChild(s);
+  }
+}
+
+async function fetchForecastReunioes() {
+  document.getElementById('fr-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast de reuniões...</div></div>';
+  try {
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/forecast-reunioes?mes=${mes}&ano=${ano}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderForecastReunioes(data);
+  } catch(e) {
+    document.getElementById('fr-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
 
 // Init
 const hoje = new Date();
