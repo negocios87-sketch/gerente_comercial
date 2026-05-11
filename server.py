@@ -1045,6 +1045,272 @@ def api_historico():
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
 
+
+# ── FORECAST DE REUNIÕES ──────────────────────────────────────
+
+def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
+    from collections import defaultdict
+    hoje = date.today()
+    mes  = mes or hoje.month
+    ano  = ano or hoje.year
+    hoje_str = hoje.strftime("%Y-%m-%d")
+
+    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
+    metas      = buscar_metas_todas(ano, mes)
+    users_pipe = buscar_users_pipe()
+    activities = buscar_activities_mes(mes, ano)
+    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
+
+    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
+    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
+
+    nome_to_subarea = {}
+    nome_to_head    = {}
+    nome_to_cargo   = {}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        hd  = str(row.get(head_col, "")).strip() if head_col else ""
+        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
+        nome_to_subarea[nn] = sub
+        nome_to_head[nn]    = hd
+        nome_to_cargo[nn]   = cg
+
+    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
+    SQUADS_SEM_SDR_FR = {"latam", "orion"}
+
+    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
+    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
+
+    # Squads visíveis
+    if head_filter is None:
+        squads_visiveis = None
+    elif head_filter == "__none__":
+        squads_visiveis = set()
+    elif head_filter.startswith("__squad__:"):
+        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
+    else:
+        head_nn = norm(head_filter)
+        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
+                           if norm(nome_to_head.get(nn, "")) == head_nn and sub}
+
+    def visivel(sub):
+        return squads_visiveis is None or norm(sub) in squads_visiveis
+
+    # Identifica SDRs (meta_reu > 0) + team leaders de squads com SDR
+    sdrs_metas = [m for m in metas if m["meta_reu"] > 0 and m["meta_fin"] > 0]
+    sdr_uid_set = set()
+    sdr_info = {}  # uid -> {nome, subarea, is_lider}
+
+    for m in sdrs_metas:
+        nn  = m["nome_norm"]
+        sub = nome_to_subarea.get(nn, "")
+        if not sub or not visivel(sub): continue
+        uid = nome_norm_to_uid.get(nn)
+        if not uid: continue
+        sdr_uid_set.add(uid)
+        sdr_info[uid] = {"nome": m["nome"], "subarea": sub, "is_lider": False}
+
+    # Team leaders de squads com SDR também são SDR no forecast
+    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+    for uid, uname in users_pipe.items():
+        nn = norm(uname)
+        if nn not in team_leaders: continue
+        own_sub = nome_to_subarea.get(nn, "")
+        if not own_sub or not visivel(own_sub): continue
+        if norm(own_sub) in SQUADS_SEM_SDR_FR: continue
+        if uid in sdr_uid_set: continue
+        sdr_uid_set.add(uid)
+        sdr_info[uid] = {"nome": uname, "subarea": own_sub, "is_lider": True}
+
+    # Mapas de atividades por owner e criador
+    acts_by_owner   = defaultdict(list)
+    acts_by_creator = defaultdict(list)
+    for act in activities:
+        oid = act.get("owner_id")
+        cid = act.get("created_by_user_id")
+        if oid: acts_by_owner[oid].append(act)
+        if cid: acts_by_creator[cid].append(act)
+
+    def get_acts_sdr(uid, sub):
+        if norm(sub) in SQUADS_CRIADOR:
+            return acts_by_creator.get(uid, [])
+        return acts_by_owner.get(uid, [])
+
+    def act_realizada(act):
+        """Mesma regra do painel individual"""
+        if not (act.get("done") is True or act.get("status") == "done"): return False
+        deal_id   = act.get("deal_id")
+        act_owner = str(act.get("owner_id", ""))
+        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
+        if act_owner and deal_owner and act_owner == deal_owner: return False
+        if deal_id and deal_id not in deal_ids_validos: return False
+        return True
+
+    # Agrega por squad → dia → SDR
+    # Estrutura: by_squad[sub_display][dia][uid] = {prevista, ag_no_dia, ag_p_outros, realizada}
+    by_squad = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {
+        "prevista": 0, "ag_no_dia": 0, "ag_p_outros": 0, "realizada": 0
+    })))
+
+    for uid, info in sdr_info.items():
+        sub = info["subarea"]
+        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
+        acts = get_acts_sdr(uid, sub)
+
+        for act in acts:
+            due_date  = str(act.get("due_date", "") or "")[:10]
+            add_date  = str(act.get("add_time",  "") or "")[:10]
+            if not due_date: continue
+
+            d = by_squad[sub_display][due_date][uid]
+
+            # Prevista: qualquer activity com due_date = esse dia
+            d["prevista"] += 1
+
+            # Ag. no Dia: criada nesse mesmo dia E due_date = esse dia
+            if add_date == due_date:
+                d["ag_no_dia"] += 1
+
+            # Ag. p/ Outros: criada nesse dia MAS due_date é outro dia
+            # (conta no dia de criação, não no due_date)
+            # — tratado separado abaixo
+
+            # Realizada
+            if act_realizada(act):
+                d["realizada"] += 1
+
+    # "Ag. p/ Outros" = criada nesse dia MAS due_date é outro dia → conta no dia de criação
+    for uid, info in sdr_info.items():
+        sub = info["subarea"]
+        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
+        acts = get_acts_sdr(uid, sub)
+
+        for act in acts:
+            due_date = str(act.get("due_date", "") or "")[:10]
+            add_date = str(act.get("add_time",  "") or "")[:10]
+            if not add_date or not due_date: continue
+            if add_date == due_date: continue  # já contou em ag_no_dia
+            # Agendou nesse dia (add_date) para outro dia (due_date)
+            # Registra no dia de criação (add_date)
+            by_squad[sub_display][add_date][uid]["ag_p_outros"] += 1
+
+    # Monta resultado final
+    import calendar as cal_mod
+    ultimo_dia = cal_mod.monthrange(ano, mes)[1]
+    all_days = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
+
+    result = {}
+    for sub_display, days in by_squad.items():
+        rows = []
+        # Inclui todos os dias do mês que tenham dados
+        dias_com_dados = sorted(days.keys())
+        for dia in dias_com_dados:
+            sdrs_dia = days[dia]
+            # Agrega totais do dia
+            tot_prev = sum(v["prevista"] for v in sdrs_dia.values())
+            tot_agnd = sum(v["ag_no_dia"] for v in sdrs_dia.values())
+            tot_agot = sum(v["ag_p_outros"] for v in sdrs_dia.values())
+            tot_real = sum(v["realizada"] for v in sdrs_dia.values())
+            is_past  = dia < hoje_str
+
+            tot_noshow = (tot_prev - tot_real) if is_past else None
+            tot_gap    = tot_prev - tot_real
+            tot_pct    = arred(safe_div(tot_real, tot_prev) * 100) if tot_prev > 0 else None
+
+            # SDRs individuais
+            sdrs_list = []
+            for uid, vals in sdrs_dia.items():
+                info = sdr_info.get(uid, {})
+                nome_sdr = info.get("nome", uid_to_nome_norm.get(uid, str(uid)))
+                is_lider = info.get("is_lider", False)
+                p = vals["prevista"]
+                r = vals["realizada"]
+                ns = (p - r) if is_past else None
+                g  = p - r
+                pct = arred(safe_div(r, p) * 100) if p > 0 else None
+                sdrs_list.append({
+                    "uid": uid,
+                    "nome": nome_sdr,
+                    "is_lider": is_lider,
+                    "prevista":    p,
+                    "ag_no_dia":   vals["ag_no_dia"],
+                    "ag_p_outros": vals["ag_p_outros"],
+                    "realizada":   r,
+                    "no_show":     ns,
+                    "gap":         g,
+                    "pct":         pct,
+                })
+            sdrs_list.sort(key=lambda x: -x["prevista"])
+
+            rows.append({
+                "dia":         dia,
+                "prevista":    tot_prev,
+                "ag_no_dia":   tot_agnd,
+                "ag_p_outros": tot_agot,
+                "realizada":   tot_real,
+                "no_show":     tot_noshow,
+                "gap":         tot_gap,
+                "pct":         tot_pct,
+                "sdrs":        sdrs_list,
+            })
+
+        # Total do squad
+        t_prev = sum(r["prevista"] for r in rows)
+        t_real = sum(r["realizada"] for r in rows)
+        t_pct  = arred(safe_div(t_real, t_prev) * 100) if t_prev > 0 else None
+        result[sub_display] = {
+            "rows": rows,
+            "total": {
+                "prevista":    t_prev,
+                "ag_no_dia":   sum(r["ag_no_dia"] for r in rows),
+                "ag_p_outros": sum(r["ag_p_outros"] for r in rows),
+                "realizada":   t_real,
+                "gap":         t_prev - t_real,
+                "pct":         t_pct,
+            }
+        }
+
+    return {
+        "squads": result,
+        "mes": mes, "ano": ano,
+        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/api/forecast-reunioes")
+def api_forecast_reunioes():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        mes = request.args.get("mes", type=int)
+        ano = request.args.get("ano", type=int)
+        nome_sess = session.get("nome", "")
+        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
+        if norm(nome_sess) in superusers:
+            head_filter = None
+        else:
+            colab_df = buscar_colaboradores()
+            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
+            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
+            if is_head:
+                head_filter = nome_sess
+            else:
+                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+                lider_sub = None
+                if lider_col:
+                    for _, row in colab_df.iterrows():
+                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
+                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
+                            break
+                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+        return jsonify(limpar_nans(calcular_forecast_reunioes(mes=mes, ano=ano, head_filter=head_filter)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
