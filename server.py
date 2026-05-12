@@ -1351,17 +1351,16 @@ def calcular_overview(mes=None, ano=None):
 
     # Meta por squad — calcular_abril aplica /10 na meta do Sheets
     # mas os deals do Pipedrive estão na escala original (x10), então corrigimos aqui
-    meta_por_squad = {}
+    # Mapa inverso: display_name -> raw_name (ex: "Olympus" -> "MGM")
+    DISPLAY_TO_RAW = {v: k for k, v in SQUAD_DISPLAY.items()}
+
+    meta_por_squad = {}  # chave = raw name (ex: "MGM")
     for sq in abril_data.get("squads", []):
         tc = sq.get("closer_total")
         if tc and tc.get("meta", 0) > 0:
-            # sq["nome"] already has display name (e.g. "Olympus")
-            # ganhos_dia keys use raw subarea (e.g. "MGM"), so map both
-            meta_por_squad[sq["nome"]] = tc["meta"]
-            # Also store with raw key in case ganhos_dia uses raw name
-            raw = next((k for k,v in SQUAD_DISPLAY.items() if v == sq["nome"]), None)
-            if raw:
-                meta_por_squad[raw] = tc["meta"]
+            nome = sq["nome"]  # pode ser "Olympus" (display) ou "MGM" (raw)
+            raw_nome = DISPLAY_TO_RAW.get(nome, nome)  # converte para raw
+            meta_por_squad[raw_nome] = tc["meta"]
 
     # Realizado por dia por squad — só closers (meta_reu == 0)
     colab_df  = buscar_colaboradores(mes=mes, ano=ano)
@@ -1372,9 +1371,6 @@ def calcular_overview(mes=None, ano=None):
         nn  = norm(str(row.get(nome_col, "")))
         sub = str(row.get(sub_col, "")).strip() if sub_col else ""
         nome_to_subarea[nn] = sub
-
-    metas_list    = buscar_metas_todas(ano, mes)
-    closers_norms = {m["nome_norm"] for m in metas_list if m["meta_reu"] == 0 and m["meta_fin"] > 0}
 
     users_pipe_ov  = buscar_users_pipe()
     uid_to_norm_ov = {uid: norm(name) for uid, name in users_pipe_ov.items()}
@@ -1389,11 +1385,11 @@ def calcular_overview(mes=None, ano=None):
             oid = get_owner_id(deal)
             owner_nn = uid_to_norm_ov.get(oid, "")
         if not owner_nn: continue
-        if owner_nn not in closers_norms: continue
+        # Qualquer pessoa do COLAB conta — heads, líderes e closers com meta
         sub = nome_to_subarea.get(owner_nn, "")
         if not sub: continue
-        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
-        ganhos_dia[sub_display][wt] += float(deal.get("value") or 0)
+        sub_raw = "Licenciados" if sub.upper().startswith("LIC") else sub
+        ganhos_dia[sub_raw][wt] += float(deal.get("value") or 0)
 
     # Monta séries por squad (exclui Zenite e Licenciados)
     result       = {}
