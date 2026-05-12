@@ -839,7 +839,7 @@ def calcular_forecast(head_filter=None):
         subarea = nome_to_subarea.get(owner_nn, "")
         if not subarea: continue
         if squads_visiveis and norm(subarea) not in squads_visiveis: continue
-        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else display_squad(subarea)
+        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
         value = float(deal.get("value") or 0)
         probability = deal.get("probability")
         d = by_squad[sub_display][date_fc]
@@ -1355,7 +1355,13 @@ def calcular_overview(mes=None, ano=None):
     for sq in abril_data.get("squads", []):
         tc = sq.get("closer_total")
         if tc and tc.get("meta", 0) > 0:
+            # sq["nome"] already has display name (e.g. "Olympus")
+            # ganhos_dia keys use raw subarea (e.g. "MGM"), so map both
             meta_por_squad[sq["nome"]] = tc["meta"]
+            # Also store with raw key in case ganhos_dia uses raw name
+            raw = next((k for k,v in SQUAD_DISPLAY.items() if v == sq["nome"]), None)
+            if raw:
+                meta_por_squad[raw] = tc["meta"]
 
     # Realizado por dia por squad — só closers (meta_reu == 0)
     colab_df  = buscar_colaboradores(mes=mes, ano=ano)
@@ -1400,7 +1406,6 @@ def calcular_overview(mes=None, ano=None):
     for squad in all_squads:
         if norm(squad) in SQUADS_EXCLUIR_OVERVIEW:
             continue
-        squad_display = display_squad(squad)
         meta = meta_por_squad.get(squad, 0.0)
         # Inclui no total apenas os 5 squads principais
         if norm(squad) in SQUADS_TOTAL_OVERVIEW:
@@ -1414,7 +1419,8 @@ def calcular_overview(mes=None, ano=None):
             du_ate   = du_acum.get(dia, 0)
             meta_mtd = arred(safe_div(meta, du_total) * du_ate) if du_total else 0
             dias.append({"dia": dia, "meta_mtd": meta_mtd, "real_mtd": arred(real_acum)})
-        result[squad_display] = {"dias": dias, "meta_total": arred(meta)}
+        # Usa nome de exibição como chave (ex: MGM -> Olympus)
+        result[display_squad(squad)] = {"dias": dias, "meta_total": arred(meta)}
 
     # Total consolidado — meta capped em 3MM, realizado dos 5 squads principais
     total_acum = 0.0
