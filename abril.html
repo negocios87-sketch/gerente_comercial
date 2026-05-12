@@ -124,6 +124,12 @@
       background: #F8F9FF;
     }
     .result-card-consolidated .rc-nome { color: var(--navy); }
+    .result-card-total-geral {
+      border-left: 3px solid var(--gold);
+      border-top: 2px solid var(--gold);
+      background: var(--gold-bg);
+    }
+    .result-card-total-geral .rc-nome { color: var(--navy); }
 
     .rc-bar { height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 8px; }
     .rc-fill { height: 100%; border-radius: 3px; }
@@ -432,8 +438,8 @@ function renderSdrs(sdrs, total, squadIdx) {
 function renderResultados(resultados) {
   if (!resultados || !resultados.length) return '';
   const cards = resultados.map(r => `
-    <div class="result-card${r.is_consolidated ? ' result-card-consolidated' : ''}">
-      <div class="rc-nome">${r.nome}${r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' : ''}</div>
+    <div class="result-card${r.is_consolidated ? ' result-card-consolidated' : ''}${r.is_total_geral ? ' result-card-total-geral' : ''}">
+      <div class="rc-nome">${r.nome}${r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' : ''}${r.is_total_geral ? ' <span class="badge-lider" style="background:var(--navy);color:var(--gold);border-color:var(--navy)">TOTAL</span>' : ''}</div>
       <div class="rc-section-label">Closers</div>
       <div class="rc-row"><span class="rc-label">Meta</span><span class="rc-val">${R(r.closer_meta)}</span></div>
       <div class="rc-row"><span class="rc-label">MTD</span><span class="rc-val">${R(r.closer_mtd)}</span></div>
@@ -539,6 +545,23 @@ function pctBadgeFc(pct) {
   return `<span class="pct-badge ${cls}">${pct.toFixed(1)}%</span>`;
 }
 
+function resumoFcRow(label, r, highlight) {
+  const bg = highlight ? 'background:#FFF9E6;border-left:3px solid var(--gold);' : 'background:#F0F4FF;border-left:3px solid var(--navy);';
+  const color = highlight ? 'color:var(--gold)' : 'color:var(--navy)';
+  return `<tr style="${bg}font-weight:700">
+    <td style="padding-left:14px;${color};font-size:12px">${label}</td>
+    <td class="col-fc">${R(r.p20||0)}</td>
+    <td class="col-fc">${R(r.p50||0)}</td>
+    <td class="col-fc">${R(r.p70||0)}</td>
+    <td class="col-fc fc-media-val">${R(r.media||0)}</td>
+    <td class="col-fc fc-gray">${R(r.em_aberto||0)}</td>
+    <td class="col-fc" style="color:${(r.realizada||r.realizado||0)>0?'var(--green)':'var(--text-muted)'}">${R(r.realizada||r.realizado||0)}</td>
+    <td class="col-fc" style="color:${(r.perda||0)>0?'var(--red)':'var(--text-muted)'}">${R(r.perda||0)}</td>
+    <td class="col-fc fc-total-bold">${R((r.em_aberto||0)+(r.realizada||r.realizado||0)+(r.perda||0))}</td>
+    <td class="col-fc">—</td>
+  </tr>`;
+}
+
 function renderForecast(data) {
   const squads = data.squads || {};
   if (!Object.keys(squads).length) {
@@ -547,9 +570,33 @@ function renderForecast(data) {
     return;
   }
 
+  const resumo = data.resumo || {};
   const COLS = ['Dia','20%','50%','70%','Média Prev.','Em Aberto','Realizado','Perda','Total Prev.','% Ating.'];
 
   let html = '';
+  // Linhas de resumo do dia de hoje
+  if (resumo.time_denise || resumo.geral) {
+    html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--navy)">
+          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO HOJE — ${resumo.hoje||''}</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">20%</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">50%</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">70%</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Média Prev.</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Em Aberto</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Realizado</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Perda</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Total Prev.</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">% Ating.</th>
+        </tr></thead>
+        <tbody>
+          ${resumo.time_denise ? resumoFcRow('🔶 Time Denise (Sniper + Elite + Olympus)', resumo.time_denise, true) : ''}
+          ${resumo.geral ? resumoFcRow('🔷 Geral (Todos os times)', resumo.geral, false) : ''}
+        </tbody>
+      </table>
+    </div>`;
+  }
   Object.entries(squads).forEach(([squad, sq]) => {
     const rows = sq.rows || [];
     const tot  = sq.total || {};
@@ -737,6 +784,7 @@ function renderHistorico(data) {
         <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
         <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(media)}</td>
         <td class="col-fc" style="color:var(--green);font-weight:600">${R(realizada)}</td>
+        <td class="col-fc">—</td>
         <td class="col-fc">${pctAting != null ? pctBadgeFc(pctAting) : '—'}</td>
       </tr>`;
 
@@ -818,6 +866,22 @@ function toggleFrDay(gid) {
   members.forEach(r => r.style.display = opening ? 'table-row' : 'none');
 }
 
+function resumoFrRow(label, r, highlight) {
+  const bg = highlight ? 'background:#FFF9E6;border-left:3px solid var(--gold);' : 'background:#F0F4FF;border-left:3px solid var(--navy);';
+  const color = highlight ? 'color:var(--gold)' : 'color:var(--navy)';
+  const ns = r.no_show != null ? `<span style="color:var(--red)">${N(r.no_show)}</span>` : '—';
+  return `<tr style="${bg}font-weight:700">
+    <td style="padding-left:14px;${color};font-size:12px">${label}</td>
+    <td class="col-fc" style="background:rgba(13,122,62,.05);color:var(--green)">${N(r.prevista||0)}</td>
+    <td class="col-fc">${N(r.ag_no_dia||0)}</td>
+    <td class="col-fc" style="color:var(--text-muted)">${N(r.ag_p_outros||0)}</td>
+    <td class="col-fc" style="color:var(--green)">${N(r.realizada||0)}</td>
+    <td class="col-fc">${ns}</td>
+    <td class="col-fc">${N(r.gap||0)}</td>
+    <td class="col-fc">—</td>
+  </tr>`;
+}
+
 function renderForecastReunioes(data) {
   const squads = data.squads || {};
   if (!Object.keys(squads).length) {
@@ -826,8 +890,31 @@ function renderForecastReunioes(data) {
     return;
   }
 
+  const resumo = data.resumo || {};
   const todayStr = new Date().toISOString().slice(0,10);
   let html = '';
+
+  // Linhas de resumo hoje
+  if (resumo.time_denise || resumo.geral) {
+    html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--navy)">
+          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO HOJE — ${resumo.hoje||''}</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Prevista</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. no Dia</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. p/ Outros</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Realizada</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">No Show</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Gap</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">GAP 25</th>
+        </tr></thead>
+        <tbody>
+          ${resumo.time_denise ? resumoFrRow('🔶 Time Denise (Sniper + Elite + Olympus)', resumo.time_denise, true) : ''}
+          ${resumo.geral ? resumoFrRow('🔷 Geral (Todos os times)', resumo.geral, false) : ''}
+        </tbody>
+      </table>
+    </div>`;
+  }
 
   Object.entries(squads).forEach(([squad, sq]) => {
     const rows = sq.rows || [];
@@ -869,6 +956,7 @@ function renderForecastReunioes(data) {
           <td class="col-fc" style="font-size:11px;color:var(--green)">${N(s.realizada)}</td>
           <td class="col-fc" style="font-size:11px">${sNs}</td>
           <td class="col-fc" style="font-size:11px">${sGap}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--amber);font-weight:600">${s.gap_25 != null ? N(s.gap_25) : '—'}</td>
           <td class="col-fc" style="font-size:11px">${s.pct != null ? pctBadgeFc(s.pct) : '—'}</td>
         </tr>`;
       });
@@ -884,6 +972,7 @@ function renderForecastReunioes(data) {
       <td style="color:var(--green);font-weight:700">${N(tot.realizada||0)}</td>
       <td>—</td>
       <td>${tGap}</td>
+      <td style="color:var(--amber);font-weight:700">${tot.gap_25 != null ? N(tot.gap_25) : '—'}</td>
       <td>${tot.pct!=null?pctBadgeFc(tot.pct):'—'}</td>
     </tr>`;
 
@@ -904,6 +993,7 @@ function renderForecastReunioes(data) {
               <th style="color:#6EE7B7">Realizada</th>
               <th style="color:#FCA5A5">No Show</th>
               <th>Gap</th>
+              <th style="color:var(--amber)">GAP 25</th>
               <th>% Ating.</th>
             </tr></thead>
             <tbody>${tbody}</tbody>
