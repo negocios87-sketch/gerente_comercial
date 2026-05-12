@@ -36,6 +36,16 @@ URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadshe
 # Squads que usam criador da atividade em vez do responsável
 SQUADS_CRIADOR = {"zenite"}
 
+# Mapeamento de nomes de exibição (cosmético)
+SQUAD_DISPLAY = {"MGM": "Olympus", "mgm": "Olympus"}
+def display_squad(nome):
+    return SQUAD_DISPLAY.get(nome, SQUAD_DISPLAY.get(nome.strip(), nome))
+
+# Squads excluídos do Overview (Jacaré)
+SQUADS_EXCLUIR_OVERVIEW = {"zenite", "licenciados"}
+# Squads incluídos no total do Overview
+SQUADS_TOTAL_OVERVIEW   = {"sniper", "elite", "mgm", "latam", "orion"}
+
 # ── HELPERS ───────────────────────────────────────────────────
 def norm(s):
     if not s: return ""
@@ -602,7 +612,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         ating_sdr    = ts["pct_final"] if ts else None
         resultado    = arred((ating_closer + ating_sdr) / 2) if ating_sdr is not None else ating_closer
         squads_result.append({
-            "nome": sq.get("nome", sub),
+            "nome": display_squad(sq.get("nome", sub)),
             "ating_closer": arred(ating_closer),
             "ating_sdr": arred(ating_sdr) if ating_sdr is not None else None,
             "resultado": arred(resultado),
@@ -625,7 +635,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         tc = total_closers(sq["closers_ind"])
         ts = total_sdrs(sq["sdrs_ind"])
         squads_out.append({
-            "nome": sq.get("nome", sub),
+            "nome": display_squad(sq.get("nome", sub)),
             "closers": sq["closers_ind"],
             "closer_total": tc,
             "sdrs": sq["sdrs_ind"],
@@ -829,7 +839,7 @@ def calcular_forecast(head_filter=None):
         subarea = nome_to_subarea.get(owner_nn, "")
         if not subarea: continue
         if squads_visiveis and norm(subarea) not in squads_visiveis: continue
-        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
+        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else display_squad(subarea)
         value = float(deal.get("value") or 0)
         probability = deal.get("probability")
         d = by_squad[sub_display][date_fc]
@@ -1379,37 +1389,46 @@ def calcular_overview(mes=None, ano=None):
         sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
         ganhos_dia[sub_display][wt] += float(deal.get("value") or 0)
 
-    # Monta séries por squad
-    result     = {}
-    meta_total = 0.0
+    # Monta séries por squad (exclui Zenite e Licenciados)
+    result       = {}
+    meta_total   = 0.0
     ganhos_total = defaultdict(float)
-    all_squads = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
+    all_squads   = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
+
+    META_CAP_TOTAL = 3_000_000  # CEO pediu cap de 3MM no gráfico total
 
     for squad in all_squads:
+        if norm(squad) in SQUADS_EXCLUIR_OVERVIEW:
+            continue
+        squad_display = display_squad(squad)
         meta = meta_por_squad.get(squad, 0.0)
-        meta_total += meta
+        # Inclui no total apenas os 5 squads principais
+        if norm(squad) in SQUADS_TOTAL_OVERVIEW:
+            meta_total += meta
+            for dia in todos_dias:
+                ganhos_total[dia] += ganhos_dia[squad].get(dia, 0.0)
         dias = []
         real_acum = 0.0
         for dia in todos_dias:
             real_acum += ganhos_dia[squad].get(dia, 0.0)
-            ganhos_total[dia] += ganhos_dia[squad].get(dia, 0.0)
             du_ate   = du_acum.get(dia, 0)
             meta_mtd = arred(safe_div(meta, du_total) * du_ate) if du_total else 0
             dias.append({"dia": dia, "meta_mtd": meta_mtd, "real_mtd": arred(real_acum)})
-        result[squad] = {"dias": dias, "meta_total": arred(meta)}
+        result[squad_display] = {"dias": dias, "meta_total": arred(meta)}
 
-    # Total consolidado
+    # Total consolidado — meta capped em 3MM, realizado dos 5 squads principais
     total_acum = 0.0
     total_dias = []
     for dia in todos_dias:
         total_acum += ganhos_total.get(dia, 0.0)
         du_ate = du_acum.get(dia, 0)
+        meta_mtd_total = min(arred(safe_div(META_CAP_TOTAL, du_total) * du_ate), META_CAP_TOTAL) if du_total else 0
         total_dias.append({
             "dia":      dia,
-            "meta_mtd": arred(safe_div(meta_total, du_total) * du_ate) if du_total else 0,
+            "meta_mtd": meta_mtd_total,
             "real_mtd": arred(total_acum),
         })
-    result["__TOTAL__"] = {"dias": total_dias, "meta_total": arred(meta_total)}
+    result["__TOTAL__"] = {"dias": total_dias, "meta_total": META_CAP_TOTAL}
 
     return {
         "squads": result,
