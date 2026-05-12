@@ -596,8 +596,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             lic_sdrs.extend(sq["sdrs_ind"])
         else:
             squads_final[sub] = sq
-    if lic_closers or lic_sdrs:
-        squads_final["Licenciados"] = {"nome": "Licenciados", "closers_ind": lic_closers, "sdrs_ind": lic_sdrs}
+    # Licenciados removidos de todas as abas conforme solicitado
+    # if lic_closers or lic_sdrs:
+    #     squads_final["Licenciados"] = {"nome": "Licenciados", ...}
 
     all_closers_ind = [c for sq in squads_final.values() for c in sq["closers_ind"]]
     all_sdrs_ind    = [s for sq in squads_final.values() for s in sq["sdrs_ind"]]
@@ -663,6 +664,36 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "sdr_bruto":     arred(sum(sq.get("sdr_bruto", 0) for sq in denise_squads)),
             "sdr_multi":     arred(sum(sq.get("sdr_multi", 0) for sq in denise_squads)),
             "sdr_reunioes":  sum(sq.get("sdr_reunioes", 0) for sq in denise_squads),
+        })
+
+    # ── Card Total Geral (exclui Zenite e Licenciados) ──
+    EXCLUIR_GERAL = {"zenite", "licenciados"}
+    squads_para_geral = [r for r in squads_result
+                         if norm(r["nome"]) not in EXCLUIR_GERAL
+                         and not r.get("is_consolidated")]
+    if squads_para_geral:
+        tg_closer   = arred(safe_div(sum(r["ating_closer"] for r in squads_para_geral), len(squads_para_geral)))
+        tg_sdr_vals = [r["ating_sdr"] for r in squads_para_geral if r.get("ating_sdr") is not None]
+        tg_sdr      = arred(sum(tg_sdr_vals) / len(tg_sdr_vals)) if tg_sdr_vals else None
+        tg_resultado= arred((tg_closer + tg_sdr) / 2) if tg_sdr is not None else tg_closer
+        squads_result.append({
+            "nome": "Total Geral",
+            "ating_closer": tg_closer,
+            "ating_sdr": tg_sdr,
+            "resultado": tg_resultado,
+            "tem_sdr": tg_sdr is not None,
+            "is_total_geral": True,
+            "closer_meta":   arred(sum(r.get("closer_meta",0) for r in squads_para_geral)),
+            "closer_mtd":    arred(sum(r.get("closer_mtd",0) for r in squads_para_geral)),
+            "closer_pct_mtd": arred(safe_div(sum(r.get("closer_bruto",0) for r in squads_para_geral), sum(r.get("closer_mtd",0) for r in squads_para_geral))*100) if sum(r.get("closer_mtd",0) for r in squads_para_geral) else 0,
+            "closer_bruto":  arred(sum(r.get("closer_bruto",0) for r in squads_para_geral)),
+            "closer_multi":  arred(sum(r.get("closer_multi",0) for r in squads_para_geral)),
+            "closer_vol":    sum(r.get("closer_vol",0) for r in squads_para_geral),
+            "sdr_meta_reu":  sum(r.get("sdr_meta_reu",0) for r in squads_para_geral),
+            "sdr_meta_fin":  arred(sum(r.get("sdr_meta_fin",0) for r in squads_para_geral)),
+            "sdr_bruto":     arred(sum(r.get("sdr_bruto",0) for r in squads_para_geral)),
+            "sdr_multi":     arred(sum(r.get("sdr_multi",0) for r in squads_para_geral)),
+            "sdr_reunioes":  sum(r.get("sdr_reunioes",0) for r in squads_para_geral),
         })
 
     return {
@@ -875,7 +906,28 @@ def calcular_forecast(head_filter=None):
         t = {k: sum(r[k] for r in rows) for k in ["p20","p50","p70","media","em_aberto","realizado","perda","total_previsto"]}
         t_ating = arred(t["realizado"]/t["total_previsto"]*100) if t["total_previsto"] else None
         result[squad] = {"rows": rows, "total": {**{k:arred(v) for k,v in t.items()}, "atingimento": t_ating}}
-    return {"squads": result, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}
+    # Resumo do dia de hoje para Time Denise e Geral
+    hoje_str_fc = date.today().strftime("%Y-%m-%d")
+    DENISE_FC   = {"sniper", "elite", "olympus", "mgm"}
+    GERAL_FC    = {"sniper", "elite", "olympus", "mgm", "latam", "orion"}
+
+    def resumo_hoje(squad_names):
+        r = {"prevista": 0.0, "ag_no_dia": 0, "ag_p_outros": 0,
+             "realizada": 0.0, "perda": 0.0, "media": 0.0,
+             "p20": 0.0, "p50": 0.0, "p70": 0.0, "em_aberto": 0.0}
+        for sq_name, sq_data in result.items():
+            if norm(sq_name) not in squad_names: continue
+            for row in sq_data.get("rows", []):
+                if row["dia"] == hoje_str_fc:
+                    for k in r: r[k] = r.get(k,0) + row.get(k, 0)
+        return {k: arred(v) for k, v in r.items()}
+
+    resumo_fc = {
+        "time_denise": resumo_hoje(DENISE_FC),
+        "geral":       resumo_hoje(GERAL_FC),
+        "hoje":        hoje_str_fc,
+    }
+    return {"squads": result, "resumo": resumo_fc, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}
 
 @app.route("/api/forecast")
 def api_forecast():
@@ -1283,8 +1335,52 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
             }
         }
 
+    # Adiciona GAP 25 a cada SDR (25/pessoa - realizado acumulado no mês)
+    # e ao total do squad
+    for sq_name, sq_data in result.items():
+        # Calcula realizado mensal por SDR
+        sdr_total_mes = defaultdict(int)
+        for row in sq_data["rows"]:
+            for sdr in row.get("sdrs", []):
+                sdr_total_mes[sdr["uid"]] += sdr["realizada"]
+        n_sdrs_meta = sum(1 for row in sq_data["rows"][:1] for s in row.get("sdrs",[]) if not s.get("is_lider"))
+        # Aplica gap_25 em cada linha/SDR
+        for row in sq_data["rows"]:
+            for sdr in row.get("sdrs", []):
+                sdr["gap_25"] = max(0, 25 - sdr_total_mes[sdr["uid"]])
+        # Total do squad: gap_25 = (25 * n_sdrs) - realizado_mes_total
+        tot = sq_data.get("total", {})
+        tot["gap_25"] = max(0, 25 * n_sdrs_meta - tot.get("realizada", 0))
+
+    # Resumo hoje para Time Denise e Geral
+    hoje_str_fr = date.today().strftime("%Y-%m-%d")
+    DENISE_FR   = {"sniper", "elite", "olympus", "mgm"}
+    GERAL_FR    = {"sniper", "elite", "olympus", "mgm", "latam", "orion"}
+
+    def resumo_reunioes_hoje(squad_names):
+        r = {"prevista": 0, "ag_no_dia": 0, "ag_p_outros": 0,
+             "realizada": 0, "no_show": None, "gap": 0}
+        has_past = False
+        for sq_name, sq_data in result.items():
+            if norm(sq_name) not in squad_names: continue
+            for row in sq_data.get("rows", []):
+                if row["dia"] == hoje_str_fr:
+                    for k in ["prevista","ag_no_dia","ag_p_outros","realizada","gap"]:
+                        r[k] = r.get(k,0) + row.get(k, 0)
+                    if row.get("no_show") is not None:
+                        has_past = True
+                        r["no_show"] = (r["no_show"] or 0) + row["no_show"]
+        return {k: v for k, v in r.items()}
+
+    resumo_fr = {
+        "time_denise": resumo_reunioes_hoje(DENISE_FR),
+        "geral":       resumo_reunioes_hoje(GERAL_FR),
+        "hoje":        hoje_str_fr,
+    }
+
     return {
         "squads": result,
+        "resumo": resumo_fr,
         "mes": mes, "ano": ano,
         "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
     }
