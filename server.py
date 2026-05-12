@@ -1335,22 +1335,36 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
             }
         }
 
-    # Adiciona GAP 25 a cada SDR (25/pessoa - realizado acumulado no mês)
-    # e ao total do squad
+    # GAP 25 = 25 - realizada do DIA — só para Sniper, Elite e Olympus/MGM
+    SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm"}
     for sq_name, sq_data in result.items():
-        # Calcula realizado mensal por SDR
-        sdr_total_mes = defaultdict(int)
+        tem_gap25 = norm(sq_name) in SQUADS_GAP25
         for row in sq_data["rows"]:
+            n_sdrs = len(row.get("sdrs", []))
+            meta_dia = 25 * n_sdrs if tem_gap25 else None
             for sdr in row.get("sdrs", []):
-                sdr_total_mes[sdr["uid"]] += sdr["realizada"]
-        n_sdrs_meta = sum(1 for row in sq_data["rows"][:1] for s in row.get("sdrs",[]) if not s.get("is_lider"))
-        # Aplica gap_25 em cada linha/SDR
-        for row in sq_data["rows"]:
-            for sdr in row.get("sdrs", []):
-                sdr["gap_25"] = max(0, 25 - sdr_total_mes[sdr["uid"]])
-        # Total do squad: gap_25 = (25 * n_sdrs) - realizado_mes_total
+                if tem_gap25:
+                    sdr["gap_25"] = max(0, 25 - sdr["realizada"])
+                    sdr["pct_25"] = arred(safe_div(sdr["realizada"], 25) * 100)
+                else:
+                    sdr["gap_25"] = None
+                    sdr["pct_25"] = None
+            tot_row_real = row.get("realizada", 0)
+            if tem_gap25 and meta_dia:
+                row["gap_25"] = max(0, meta_dia - tot_row_real)
+                row["pct_25"] = arred(safe_div(tot_row_real, meta_dia) * 100)
+            else:
+                row["gap_25"] = None
+                row["pct_25"] = None
         tot = sq_data.get("total", {})
-        tot["gap_25"] = max(0, 25 * n_sdrs_meta - tot.get("realizada", 0))
+        if tem_gap25:
+            tot_real = tot.get("realizada", 0)
+            n_sdrs_total = len({s["uid"] for row in sq_data["rows"] for s in row.get("sdrs",[])})
+            tot["gap_25"] = max(0, 25 * n_sdrs_total - tot_real)
+            tot["pct_25"] = arred(safe_div(tot_real, 25 * n_sdrs_total) * 100) if n_sdrs_total else 0
+        else:
+            tot["gap_25"] = None
+            tot["pct_25"] = None
 
     # Resumo hoje para Time Denise e Geral
     hoje_str_fr = date.today().strftime("%Y-%m-%d")
