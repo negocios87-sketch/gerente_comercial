@@ -970,7 +970,7 @@ function criarGrafico(canvasId, squad, dias, metaTotal) {
 
   const pointColors = realLine.map((v, i) => {
     if (i === todayIdx) return '#B8860B';
-    return v >= metaLine[i] ? '#0D7A3E' : '#B91C1C';
+    return 'transparent';
   });
 
   const ctx = document.getElementById(canvasId);
@@ -1001,10 +1001,7 @@ function criarGrafico(canvasId, squad, dias, metaTotal) {
           data: realLine,
           borderColor: '#1A1A2E',
           borderWidth: 2.5,
-          pointRadius: dias.map((d,i) => {
-            if (i === todayIdx) return 7;
-            return labelDays.has(i) ? 4 : 2;
-          }),
+          pointRadius: dias.map((d,i) => i === todayIdx ? 7 : 0),
           pointBackgroundColor: pointColors,
           pointBorderColor: '#fff',
           pointBorderWidth: 1.5,
