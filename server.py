@@ -174,7 +174,7 @@ def buscar_metas_todas(ano, mes):
         if a != ano or m != mes: continue
         nome_raw = str(row[col_nome]).strip() if col_nome else ""
         meta_reu = to_num(row[col_reu]) if col_reu else 0.0
-        meta_fin = (to_num(row[col_fin]) if col_fin else 0.0) / 10
+        meta_fin = to_num(row[col_fin]) if col_fin else 0.0
         dias_ut  = 0
         if col_du:
             try: dias_ut = int(float(str(row[col_du] or 0)))
@@ -1345,7 +1345,7 @@ def calcular_overview(mes=None, ano=None):
     for sq in abril_data.get("squads", []):
         tc = sq.get("closer_total")
         if tc and tc.get("meta", 0) > 0:
-            meta_por_squad[sq["nome"]] = tc["meta"] * 10
+            meta_por_squad[sq["nome"]] = tc["meta"]
 
     # Realizado por dia por squad — só closers (meta_reu == 0)
     colab_df  = buscar_colaboradores(mes=mes, ano=ano)
