@@ -1,1434 +1,1186 @@
-"""
-Board Academy — Forecast Dashboard
-Deploy: Render.com
-"""
-
-from flask import Flask, jsonify, request, session, redirect, render_template
-import requests as req
-import pandas as pd
-import os
-import unicodedata
-import calendar
-import math
-from datetime import date, datetime, timedelta
-from io import StringIO
-
-app = Flask(__name__, template_folder='.')
-app.secret_key = os.environ.get("SECRET_KEY", "boardacademy2026secret")
-
-API_KEY           = os.environ.get("PIPE_API_KEY", "")
-
-BASE_V1           = "https://boardacademy.pipedrive.com/api/v1"
-BASE_V2           = "https://boardacademy.pipedrive.com/api/v2"
-FILTER_DEALS      = int(os.environ.get("FILTER_DEALS",      "74674"))
-FILTER_DEALS_RV   = int(os.environ.get("FILTER_DEALS_RV",   "1431880"))
-FILTER_ACTIVITIES = int(os.environ.get("FILTER_ACTIVITIES", "1310451"))
-
-CF_MULTIPLICADOR = "7e0e43c2734751f77be292a72527f638a850ad50"
-CF_QUALIFICADOR  = "a6f13cc27c8d041f3af4091283ce0d4fe0913875"
-CF_REUNIAO_VALID = "7299bf170c5deab9b4fd8c2275f55faf51984dea"
-
-URL_COLAB    = os.environ.get("URL_COLAB",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1782440078&single=true&output=csv")
-URL_METAS    = os.environ.get("URL_METAS",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=0&single=true&output=csv")
-URL_USERS    = os.environ.get("URL_USERS",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=160245570&single=true&output=csv")
-URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1010928978&single=true&output=csv")
-
-# Squads que usam criador da atividade em vez do responsável
-SQUADS_CRIADOR = {"zenite"}
-
-# ── HELPERS ───────────────────────────────────────────────────
-def norm(s):
-    if not s: return ""
-    s = str(s).strip().lower()
-    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
-
-SUPERUSERS_RAW = os.environ.get("SUPERUSERS", "farias souza")
-MASTERS_RAW   = os.environ.get("MASTERS", "rodrigo leira,matheus paz,farias souza")
-GITHUB_TOKEN  = os.environ.get("GITHUB_TOKEN", "")
-GITHUB_REPO   = "negocios87-sketch/gerente_comercial"
-GITHUB_BRANCH = "main"
-
-def arred(v):
-    try:
-        f = float(v)
-        return 0.0 if math.isnan(f) or math.isinf(f) else round(f, 2)
-    except: return 0.0
-
-def safe_div(a, b):
-    try: return float(a) / float(b) if b else 0.0
-    except: return 0.0
-
-def cf(deal, key):
-    val = deal.get(key)
-    if val is None: return None
-    if isinstance(val, dict): return val.get("value") or val.get("label")
-    return val
-
-def get_owner_name(deal):
-    uid = deal.get("user_id")
-    if isinstance(uid, dict): return uid.get("name", "")
-    return ""
-
-def get_owner_id(deal):
-    uid = deal.get("user_id")
-    if isinstance(uid, dict): return uid.get("id")
-    return uid
-
-def du_mes_total(ano, mes, feriados=set()):
-    return sum(1 for d in range(1, calendar.monthrange(ano, mes)[1] + 1)
-               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
-
-def du_passados(ano, mes, feriados=set()):
-    hoje = date.today()
-    return max(sum(1 for d in range(1, min(hoje.day, calendar.monthrange(ano, mes)[1]) + 1)
-                   if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados), 1)
-
-def du_restantes(ano, mes, feriados=set()):
-    hoje = date.today()
-    ultimo = calendar.monthrange(ano, mes)[1]
-    return sum(1 for d in range(hoje.day + 1, ultimo + 1)
-               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
-
-def limpar_nans(obj):
-    if isinstance(obj, dict): return {k: limpar_nans(v) for k, v in obj.items()}
-    if isinstance(obj, list): return [limpar_nans(v) for v in obj]
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)): return None
-    return obj
-
-# ── SHEETS ────────────────────────────────────────────────────
-def ler_sheet(url):
-    resp = req.get(url, timeout=15)
-    resp.encoding = "utf-8"
-    resp.raise_for_status()
-    return pd.read_csv(StringIO(resp.text))
-
-def buscar_usuario(usuario, senha):
-    df = ler_sheet(URL_USERS)
-    df.columns = [c.strip().lower() for c in df.columns]
-    for _, row in df.iterrows():
-        if (norm(str(row.get("usuario", ""))) == norm(usuario) and
-                str(row.get("senha", "")).strip() == str(senha).strip()):
-            return str(row.get("usuario", ""))
-    return None
-
-def buscar_colaboradores(mes=None, ano=None):
-    df = ler_sheet(URL_COLAB)
-    df.columns = [c.strip() for c in df.columns]
-
-    mes_col = next((c for c in df.columns if "mes" in norm(c) and "ref" in norm(c)), None)
-    ano_col = next((c for c in df.columns if "ano" in norm(c) and "ref" in norm(c)), None)
-
-    if mes_col and ano_col and mes and ano:
-        def to_int(v):
-            try: return int(float(str(v)))
-            except: return 0
-        mask = (df[mes_col].apply(to_int) == mes) & (df[ano_col].apply(to_int) == ano)
-        df = df[mask].copy() if not df.empty else df
-        if df.empty:
-            df = ler_sheet(URL_COLAB)
-            df.columns = [c.strip() for c in df.columns]
-
-    status_col = next((c for c in df.columns if "status" in norm(c)), None)
-    if status_col:
-        df = df[df[status_col].apply(lambda x: norm(str(x)) == "ativo")]
-    return df
-
-def buscar_feriados():
-    try:
-        df = ler_sheet(URL_FERIADOS)
-        feriados = set()
-        for _, row in df.iterrows():
-            val = str(row.iloc[0]).strip()
-            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y"):
-                try:
-                    feriados.add(datetime.strptime(val, fmt).date())
-                    break
-                except: continue
-        return feriados
-    except: return set()
-
-def buscar_metas_todas(ano, mes):
-    df = ler_sheet(URL_METAS)
-    df.columns = [c.strip() for c in df.columns]
-
-    def to_num(v):
-        try:
-            if v is None: return 0.0
-            if isinstance(v, float) and math.isnan(v): return 0.0
-            return float(str(v).replace("R$","").replace(".","").replace(",",".").strip() or "0")
-        except: return 0.0
-
-    col_ano  = next((c for c in df.columns if norm(c) == "ano"), None)
-    col_mes  = next((c for c in df.columns if norm(c) == "mes"), None)
-    col_nome = next((c for c in df.columns if norm(c) == "nome"), None)
-    col_reu  = next((c for c in df.columns if "reuni" in norm(c) and "meta" in norm(c)), None)
-    col_fin  = next((c for c in df.columns if "financ" in norm(c)), None)
-    col_du   = next((c for c in df.columns if "util" in norm(c)), None)
-
-    rows = []
-    for _, row in df.iterrows():
-        try:
-            a = int(float(str(row[col_ano]))) if col_ano else 0
-            m = int(float(str(row[col_mes]))) if col_mes else 0
-        except: continue
-        if a != ano or m != mes: continue
-        nome_raw = str(row[col_nome]).strip() if col_nome else ""
-        meta_reu = to_num(row[col_reu]) if col_reu else 0.0
-        meta_fin = (to_num(row[col_fin]) if col_fin else 0.0) / 10
-        dias_ut  = 0
-        if col_du:
-            try: dias_ut = int(float(str(row[col_du] or 0)))
-            except: dias_ut = 0
-        rows.append({
-            "nome": nome_raw, "nome_norm": norm(nome_raw),
-            "meta_reu": meta_reu, "meta_fin": meta_fin, "dias_uteis": dias_ut,
-        })
-    return rows
-
-# ── PIPEDRIVE ─────────────────────────────────────────────────
-def buscar_users_pipe():
-    resp = req.get(f"{BASE_V1}/users", params={"api_token": API_KEY}, timeout=15)
-    resp.raise_for_status()
-    return {u["id"]: u["name"] for u in (resp.json().get("data") or [])}
-
-def buscar_qual_ids():
-    resp = req.get(f"{BASE_V1}/dealFields", params={"api_token": API_KEY}, timeout=15)
-    resp.raise_for_status()
-    for field in (resp.json().get("data") or []):
-        if field.get("key") == CF_QUALIFICADOR:
-            return {norm(opt.get("label", "")): str(opt.get("id")) for opt in (field.get("options") or [])}
-    return {}
-
-def won_time_br(deal):
-    wt = deal.get("won_time", "")
-    if not wt: return ""
-    try:
-        dt = datetime.fromisoformat(str(wt).replace("Z", "+00:00"))
-        dt_br = dt - timedelta(hours=3)
-        return dt_br.strftime("%Y-%m-%d %H:%M:%S")
-    except: return str(wt)
-
-def buscar_deals_mes(mes, ano):
-    todos, start = [], 0
-    mes_str = f"{ano}-{mes:02d}"
-    while True:
-        resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS, "status": "won",
-            "sort": "won_time DESC", "limit": 500,
-            "start": start, "api_token": API_KEY,
-        }, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        found_older = False
-        for deal in lote:
-            wt_br = won_time_br(deal)[:7]
-            if wt_br == mes_str: todos.append(deal)
-            elif wt_br < mes_str: found_older = True
-        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote or found_older: break
-        start += 500
-    return todos
-
-def buscar_activities_mes(mes, ano):
-    todos, cursor = [], None
-    mes_str = f"{ano}-{mes:02d}"
-    while True:
-        params = {"filter_id": FILTER_ACTIVITIES, "limit": 200}
-        if cursor: params["cursor"] = cursor
-        resp = req.get(f"{BASE_V2}/activities", params=params,
-                       headers={"x-api-token": API_KEY}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for act in lote:
-            if str(act.get("due_date", ""))[:7] == mes_str:
-                todos.append(act)
-        cursor = data.get("additional_data", {}).get("next_cursor")
-        if not cursor or not lote: break
-    return todos
-
-def buscar_deals_por_ids(deal_ids):
-    mapa = {}
-    for deal_id in set(deal_ids):
-        if not deal_id: continue
-        try:
-            resp = req.get(f"{BASE_V1}/deals/{deal_id}",
-                params={"api_token": API_KEY}, timeout=10)
-            if resp.status_code == 200:
-                d = resp.json().get("data") or {}
-                mapa[deal_id] = cf(d, CF_REUNIAO_VALID)
-        except: pass
-    return mapa
-
-def buscar_deals_rv_mes(mes, ano):
-    deal_ids_validos = set()
-    mapa_owner = {}
-    start = 0
-    while True:
-        resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS_RV,
-            "status": "all_not_deleted",
-            "limit": 500, "start": start,
-            "api_token": API_KEY,
-        }, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for d in lote:
-            did = d["id"]
-            uid = d.get("user_id")
-            deal_ids_validos.add(did)
-            mapa_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
-        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote: break
-        start += 500
-    return deal_ids_validos, mapa_owner
-
-def calcular_abril(mes=None, ano=None, head_filter=None):
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-
-    feriados  = buscar_feriados()
-    du_calc   = du_mes_total(ano, mes, feriados)
-    hoje      = date.today()
-    if (ano < hoje.year) or (ano == hoje.year and mes < hoje.month):
-        du_pass = du_calc
-        du_rest = 0
-    else:
-        du_pass = du_passados(ano, mes, feriados)
-        du_rest = du_restantes(ano, mes, feriados)
-
-    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
-    metas      = buscar_metas_todas(ano, mes)
-    users_pipe = buscar_users_pipe()
-    qual_ids   = buscar_qual_ids()
-    deals      = buscar_deals_mes(mes, ano)
-    activities = buscar_activities_mes(mes, ano)
-
-    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
-
-    nome_to_subarea = {}
-    nome_to_head    = {}
-    nome_to_cargo   = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        hd  = str(row.get(head_col, "")).strip() if head_col else ""
-        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
-        nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = hd
-        nome_to_cargo[nn]   = cg
-
-    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
-    SQUADS_SEM_SDR = {"latam", "orion"}
-
-    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
-    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
-
-    if head_filter is None:
-        squads_visiveis = None
-    elif head_filter == "__none__":
-        squads_visiveis = set()
-    elif head_filter.startswith("__squad__:"):
-        sub_direto = norm(head_filter.replace("__squad__:", ""))
-        squads_visiveis = {sub_direto}
-    else:
-        head_nn = norm(head_filter)
-        squads_visiveis = set(
-            norm(sub) for nn, sub in nome_to_subarea.items()
-            if norm(nome_to_head.get(nn, "")) == head_nn and sub
-        )
-
-    def visivel(sub):
-        return squads_visiveis is None or norm(sub) in squads_visiveis
-
-    closer_real = {}
-    for deal in deals:
-        owner_nome = norm(get_owner_name(deal))
-        if not owner_nome:
-            oid = get_owner_id(deal)
-            owner_nome = uid_to_nome_norm.get(oid, "")
-        if not owner_nome: continue
-        valor       = float(deal.get("value") or 0)
-        valor_multi = float(cf(deal, CF_MULTIPLICADOR) or 0)
-        if owner_nome not in closer_real:
-            closer_real[owner_nome] = {"valor": 0, "valor_multi": 0, "qtd": 0}
-        closer_real[owner_nome]["valor"]       += valor
-        closer_real[owner_nome]["valor_multi"] += valor_multi
-        closer_real[owner_nome]["qtd"]         += 1
-
-    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
-    for d in deals:
-        did = d["id"]
-        if did not in mapa_deal_owner:
-            uid = d.get("user_id")
-            mapa_deal_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
-
-    # Agrupa atividades por owner_id E por created_by_user_id (para Zenite)
-    acts_by_owner   = {}
-    acts_by_creator = {}
-    for act in activities:
-        oid = str(act.get("owner_id", ""))
-        acts_by_owner.setdefault(oid, []).append(act)
-        cid = str(act.get("created_by_user_id", ""))
-        if cid:
-            acts_by_creator.setdefault(cid, []).append(act)
-
-    def act_valida(act, sub=""):
-        if not (act.get("done") is True or act.get("status") == "done"): return False
-        deal_id = act.get("deal_id")
-        act_owner = str(act.get("owner_id", ""))
-        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
-        if act_owner and deal_owner and act_owner == deal_owner:
-            return False
-        if deal_id and deal_id not in deal_ids_validos:
-            return False
-        return True
-
-    if (ano > 2026) or (ano == 2026 and mes >= 5):
-        PESO_REU = 0.70
-        PESO_FIN = 0.30
-    else:
-        PESO_REU = 0.50
-        PESO_FIN = 0.50
-
-    du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
-    du_total = du_sheet if du_sheet > 0 else du_calc
-
-    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
-    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
-
-    def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False):
-        mtd = safe_div(meta, du_total) * du_pass if du_total else 0
-        return {
-            "nome": nome, "meta": arred(meta), "is_head": is_head,
-            "dias_uteis": du_total, "meta_du": arred(safe_div(meta, du_total)),
-            "realizado": arred(real),
-            "pct_atingido": arred(safe_div(real, meta) * 100),
-            "mtd": arred(mtd), "deficit_mtd": arred(mtd - real),
-            "pct_mtd": arred(safe_div(real, mtd) * 100),
-            "deficit_meta": arred(meta - real),
-            "meta_dia_100": arred(safe_div(meta - real, du_rest)) if du_rest else 0,
-            "realizado_multi": arred(real_multi),
-            "pct_atingido_multi": arred(safe_div(real_multi, meta) * 100),
-            "deficit_meta_multi": arred(meta - real_multi),
-            "meta_dia_multi": arred(safe_div(meta - real_multi, du_rest)) if du_rest else 0,
-            "qtd_ganhos": qtd,
-            "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
-        }
-
-    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-    lider_nomes = set()
-    if lider_col:
-        for _, row in colab_df.iterrows():
-            lider_nome  = norm(str(row.get(lider_col, "")))
-            membro_nome = norm(str(row.get(nome_col, "")))
-            if lider_nome and lider_nome != membro_nome:
-                lider_nomes.add(lider_nome)
-
-    squads = {}
-
-    def get_squad(sub):
-        if sub not in squads:
-            squads[sub] = {"nome": sub, "closers_ind": [], "sdrs_ind": []}
-        return squads[sub]
-
-    for m in closers_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
-        ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
-        get_squad(sub)["closers_ind"].append(
-            build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"])
-        )
-
-    for uid, uname in users_pipe.items():
-        nn      = norm(uname)
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
-        if nn not in closer_real: continue
-        is_head_of    = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
-        is_lider_of   = nn in lider_nomes and nn not in team_leaders
-        is_tl_sem_sdr = nn in team_leaders and norm(own_sub) in SQUADS_SEM_SDR
-        if not is_head_of and not is_lider_of and not is_tl_sem_sdr: continue
-        existing = [norm(c["nome"]) for c in squads.get(own_sub, {}).get("closers_ind", [])]
-        if nn in existing: continue
-        ri = closer_real[nn]
-        get_squad(own_sub)["closers_ind"].append(
-            build_closer_row(uname, 0, ri["valor"], ri["valor_multi"], ri["qtd"], is_head=True)
-        )
-
-    # SDRs — usa criador da atividade para squads em SQUADS_CRIADOR
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
-        meta_reu = m["meta_reu"] / 10
-        meta_fin = m["meta_fin"]
-        uid      = nome_norm_to_uid.get(nn)
-        uid_str  = str(uid) if uid else ""
-
-        # Zenite: usa created_by_user_id; demais: owner_id
-        if norm(sub) in SQUADS_CRIADOR:
-            acts_sdr = acts_by_creator.get(uid_str, [])
-        else:
-            acts_sdr = acts_by_owner.get(uid_str, [])
-
-        validadas     = [a for a in acts_sdr if act_valida(a, sub)]
-        qtd_val       = len(validadas)
-        deveria_estar = arred(safe_div(meta_reu, du_total) * du_pass)
-        pct_reu       = arred(safe_div(qtd_val, meta_reu) * 100)
-        qual_id       = qual_ids.get(nn)
-        deals_sdr     = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
-        qtd_ganhos    = len(deals_sdr)
-        valor_ganho   = sum(float(d.get("value") or 0) for d in deals_sdr)
-        valor_multi   = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
-        pct_ganhos    = arred(safe_div(valor_multi, meta_fin) * 100)
-        pct_final     = arred(pct_reu * PESO_REU + pct_ganhos * PESO_FIN)
-        get_squad(sub)["sdrs_ind"].append({
-            "nome": m["nome"], "subarea": sub,
-            "meta_reuniao": meta_reu,
-            "meta_diaria": arred(safe_div(meta_reu, du_total)),
-            "validadas": qtd_val,
-            "deveria_estar": deveria_estar,
-            "faltam": arred(deveria_estar - qtd_val),
-            "pct_reu": pct_reu,
-            "meta_ganho": arred(meta_fin),
-            "qtd_ganhos": qtd_ganhos,
-            "valor_ganho": arred(valor_ganho),
-            "valor_ganho_multi": arred(valor_multi),
-            "pct_ganhos": pct_ganhos,
-            "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
-            "pct_final": pct_final,
-        })
-
-    sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
-    for uid, uname in users_pipe.items():
-        nn = norm(uname)
-        if nn not in lider_nomes and nn not in team_leaders: continue
-        if nn in sdr_nomes_ja: continue
-        if nn not in team_leaders: continue
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
-        if norm(own_sub) in SQUADS_SEM_SDR: continue
-        uid_str = str(uid)
-
-        if norm(own_sub) in SQUADS_CRIADOR:
-            acts_sdr = acts_by_creator.get(uid_str, [])
-        else:
-            acts_sdr = acts_by_owner.get(uid_str, [])
-
-        validadas   = [a for a in acts_sdr if act_valida(a, own_sub)]
-        qtd_val     = len(validadas)
-        qual_id     = qual_ids.get(nn)
-        deals_sdr   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
-        qtd_ganhos  = len(deals_sdr)
-        valor_ganho = sum(float(d.get("value") or 0) for d in deals_sdr)
-        valor_multi = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
-        if qtd_val == 0 and qtd_ganhos == 0: continue
-        get_squad(own_sub)["sdrs_ind"].append({
-            "nome": uname, "subarea": own_sub, "is_lider": True,
-            "meta_reuniao": 0, "meta_diaria": 0,
-            "validadas": qtd_val, "deveria_estar": 0,
-            "faltam": 0, "pct_reu": 0, "meta_ganho": 0,
-            "qtd_ganhos": qtd_ganhos,
-            "valor_ganho": arred(valor_ganho),
-            "valor_ganho_multi": arred(valor_multi),
-            "pct_ganhos": 0,
-            "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
-            "pct_final": 0.0,
-        })
-
-    def total_closers(ind):
-        if not ind: return None
-        t_meta = sum(c["meta"] for c in ind)
-        t_real = sum(c["realizado"] for c in ind)
-        t_multi= sum(c["realizado_multi"] for c in ind)
-        t_qtd  = sum(c["qtd_ganhos"] for c in ind)
-        return build_closer_row("TOTAL", t_meta, t_real, t_multi, t_qtd)
-
-    def total_sdrs(ind):
-        if not ind: return None
-        t_reu  = sum(s["meta_reuniao"] for s in ind)
-        t_val  = sum(s["validadas"] for s in ind)
-        t_dev  = sum(s["deveria_estar"] for s in ind)
-        t_mg   = sum(s["meta_ganho"] for s in ind)
-        t_ganho= sum(s["valor_ganho"] for s in ind)
-        t_multi= sum(s["valor_ganho_multi"] for s in ind)
-        t_qtd  = sum(s["qtd_ganhos"] for s in ind)
-        pct_r  = arred(safe_div(t_val, t_reu) * 100)
-        pct_g  = arred(safe_div(t_multi, t_mg) * 100)
-        return {
-            "nome": "TOTAL", "subarea": "",
-            "meta_reuniao": t_reu,
-            "meta_diaria": arred(safe_div(t_reu, du_total)),
-            "validadas": t_val, "deveria_estar": arred(t_dev),
-            "faltam": arred(t_dev - t_val),
-            "pct_reu": pct_r, "meta_ganho": arred(t_mg),
-            "qtd_ganhos": t_qtd, "valor_ganho": arred(t_ganho),
-            "valor_ganho_multi": arred(t_multi),
-            "pct_ganhos": pct_g,
-            "ticket_medio": arred(safe_div(t_ganho, t_qtd)) if t_qtd else 0,
-            "pct_final": arred(pct_r * PESO_REU + pct_g * PESO_FIN),
-        }
-
-    squads_final = {}
-    lic_closers = []
-    lic_sdrs    = []
-    for sub, sq in squads.items():
-        if sub.upper().startswith("LIC"):
-            lic_closers.extend(sq["closers_ind"])
-            lic_sdrs.extend(sq["sdrs_ind"])
-        else:
-            squads_final[sub] = sq
-    if lic_closers or lic_sdrs:
-        squads_final["Licenciados"] = {"nome": "Licenciados", "closers_ind": lic_closers, "sdrs_ind": lic_sdrs}
-
-    all_closers_ind = [c for sq in squads_final.values() for c in sq["closers_ind"]]
-    all_sdrs_ind    = [s for sq in squads_final.values() for s in sq["sdrs_ind"]]
-    total_geral_c   = total_closers(all_closers_ind)
-    total_geral_s   = total_sdrs(all_sdrs_ind)
-
-    squads_result = []
-    for sub, sq in squads_final.items():
-        tc = total_closers(sq["closers_ind"])
-        ts = total_sdrs(sq["sdrs_ind"])
-        ating_closer = tc["pct_atingido_multi"] if tc else 0
-        ating_sdr    = ts["pct_final"] if ts else None
-        resultado    = arred((ating_closer + ating_sdr) / 2) if ating_sdr is not None else ating_closer
-        squads_result.append({
-            "nome": sq.get("nome", sub),
-            "ating_closer": arred(ating_closer),
-            "ating_sdr": arred(ating_sdr) if ating_sdr is not None else None,
-            "resultado": arred(resultado),
-            "tem_sdr": ts is not None,
-            "closer_meta":    arred(tc["meta"]) if tc else 0,
-            "closer_mtd":     arred(tc["mtd"]) if tc else 0,
-            "closer_pct_mtd": arred(tc["pct_mtd"]) if tc else 0,
-            "closer_bruto":   arred(tc["realizado"]) if tc else 0,
-            "closer_multi":   arred(tc["realizado_multi"]) if tc else 0,
-            "closer_vol":     tc["qtd_ganhos"] if tc else 0,
-            "sdr_meta_reu":  arred(ts["meta_reuniao"]) if ts else 0,
-            "sdr_meta_fin":  arred(ts["meta_ganho"]) if ts else 0,
-            "sdr_bruto":     arred(ts["valor_ganho"]) if ts else 0,
-            "sdr_multi":     arred(ts["valor_ganho_multi"]) if ts else 0,
-            "sdr_reunioes":  ts["validadas"] if ts else 0,
-        })
-
-    squads_out = []
-    for sub, sq in squads_final.items():
-        tc = total_closers(sq["closers_ind"])
-        ts = total_sdrs(sq["sdrs_ind"])
-        squads_out.append({
-            "nome": sq.get("nome", sub),
-            "closers": sq["closers_ind"],
-            "closer_total": tc,
-            "sdrs": sq["sdrs_ind"],
-            "sdr_total": ts,
-        })
-
-    DENISE_SQUADS = {"elite", "sniper", "mgm", "olympus"}
-    denise_squads = [r for r in squads_result if norm(r["nome"]) in DENISE_SQUADS]
-    if denise_squads:
-        d_closer = arred(safe_div(sum(sq["ating_closer"] for sq in denise_squads), len(denise_squads)))
-        d_sdr_vals = [sq["ating_sdr"] for sq in denise_squads if sq["ating_sdr"] is not None]
-        d_sdr = arred(sum(d_sdr_vals) / len(d_sdr_vals)) if d_sdr_vals else None
-        d_resultado = arred((d_closer + d_sdr) / 2) if d_sdr is not None else d_closer
-        squads_result.append({
-            "nome": "Denise Mussolin", "ating_closer": d_closer, "ating_sdr": d_sdr,
-            "resultado": d_resultado, "tem_sdr": d_sdr is not None, "is_consolidated": True,
-            "closer_meta":   arred(sum(sq.get("closer_meta", 0) for sq in denise_squads)),
-            "closer_mtd":    arred(sum(sq.get("closer_mtd", 0) for sq in denise_squads)),
-            "closer_pct_mtd": arred(safe_div(sum(sq.get("closer_bruto", 0) for sq in denise_squads), sum(sq.get("closer_mtd", 0) for sq in denise_squads)) * 100) if sum(sq.get("closer_mtd", 0) for sq in denise_squads) else 0,
-            "closer_bruto":  arred(sum(sq.get("closer_bruto", 0) for sq in denise_squads)),
-            "closer_multi":  arred(sum(sq.get("closer_multi", 0) for sq in denise_squads)),
-            "closer_vol":    sum(sq.get("closer_vol", 0) for sq in denise_squads),
-            "sdr_meta_reu":  sum(sq.get("sdr_meta_reu", 0) for sq in denise_squads),
-            "sdr_meta_fin":  arred(sum(sq.get("sdr_meta_fin", 0) for sq in denise_squads)),
-            "sdr_bruto":     arred(sum(sq.get("sdr_bruto", 0) for sq in denise_squads)),
-            "sdr_multi":     arred(sum(sq.get("sdr_multi", 0) for sq in denise_squads)),
-            "sdr_reunioes":  sum(sq.get("sdr_reunioes", 0) for sq in denise_squads),
-        })
-
-    return {
-        "periodo": {
-            "mes": mes, "ano": ano,
-            "du_total": du_total, "du_passados": du_pass, "du_restantes": du_rest,
-            "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forecast Comercial — Board Academy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --gold: #B8860B; --gold-lt: #D4A017; --gold-bg: #FFF9E6;
+      --navy: #1A1A2E; --bg: #F4F5F7; --white: #FFFFFF;
+      --text: #1E1E2E; --text-muted: #6B7280; --border: #E2E4E9;
+      --green: #0D7A3E; --green-bg: #ECFDF5;
+      --red: #B91C1C; --red-bg: #FEF2F2;
+      --amber: #92400E; --amber-bg: #FFFBEB;
+      --shadow: 0 1px 3px rgba(0,0,0,.08);
+      --shadow-md: 0 4px 6px rgba(0,0,0,.07);
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 13px; }
+
+    /* HEADER */
+    .header { background: var(--navy); padding: 0 28px; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 100; box-shadow: var(--shadow-md); }
+    .header-left { display: flex; align-items: center; gap: 28px; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-bar { width: 3px; height: 22px; background: var(--gold); border-radius: 2px; }
+    .brand-text { color: var(--white); font-size: 14px; font-weight: 700; letter-spacing: .5px; }
+    .brand-sub { color: var(--gold); font-size: 10px; letter-spacing: 1.5px; font-weight: 600; text-transform: uppercase; }
+    .periodo-badge { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 4px 12px; color: rgba(255,255,255,.75); font-size: 12px; }
+    .periodo-badge strong { color: var(--gold); }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .update-info { color: rgba(255,255,255,.45); font-size: 11px; }
+    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; color: rgba(255,255,255,.6); font-size: 11px; padding: 5px 12px; text-decoration: none; transition: all .2s; }
+    .btn-logout:hover { border-color: var(--gold); color: var(--gold); }
+    .filter-group { display: flex; gap: 6px; align-items: center; }
+    .filter-group select { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15); border-radius: 5px; color: var(--white); font-size: 12px; padding: 5px 10px; cursor: pointer; outline: none; }
+    .filter-group select option { background: #1A1A2E; color: white; }
+
+    /* TABS */
+    .tab-bar { background: var(--white); border-bottom: 1px solid var(--border); padding: 0 28px; display: flex; }
+    .tab { padding: 12px 18px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all .2s; margin-bottom: -1px; }
+    .tab:hover { color: var(--navy); }
+    .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+    /* MAIN */
+    .main { padding: 24px 28px; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* SQUAD BLOCK */
+    .squad-block { margin-bottom: 32px; }
+    .squad-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .squad-title { font-size: 15px; font-weight: 700; color: var(--navy); text-transform: uppercase; letter-spacing: .5px; }
+    .squad-divider { flex: 1; height: 1px; background: var(--border); }
+
+    /* SECTION */
+    .section { margin-bottom: 16px; }
+    .section-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; padding-left: 2px; }
+
+    /* CARD */
+    .card { background: var(--white); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; }
+
+    /* TOGGLE */
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .toggle-group { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .toggle-btn { padding: 5px 12px; font-size: 11px; font-weight: 600; border: none; background: transparent; cursor: pointer; color: var(--text-muted); transition: all .15s; }
+    .toggle-btn.active { background: var(--navy); color: var(--white); }
+
+    /* TABLE */
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead tr { background: var(--navy); }
+    thead th { color: rgba(255,255,255,.7); font-size: 10px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; padding: 9px 12px; text-align: right; white-space: nowrap; }
+    thead th:first-child { text-align: left; padding-left: 16px; }
+    .th-group { background: rgba(255,255,255,.04) !important; color: var(--gold) !important; font-size: 9px !important; letter-spacing: 1px !important; text-align: center !important; border-bottom: 1px solid rgba(255,255,255,.08); }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: #F8F9FF; }
+    tbody tr:last-child { border-bottom: none; }
+    td { padding: 10px 12px; text-align: right; white-space: nowrap; }
+    td:first-child { text-align: left; padding-left: 16px; font-weight: 600; }
+    .row-total { background: var(--gold-bg) !important; border-top: 2px solid var(--gold) !important; }
+    .row-total td { font-weight: 700; color: var(--navy); }
+    .row-total td:first-child { color: var(--gold); }
+
+    /* EXPAND */
+    .row-group { cursor: pointer; user-select: none; }
+    .row-group:hover { background: #F0F4FF !important; }
+    .row-group td:first-child::before { content: '▼'; display: inline-block; font-size: 9px; color: var(--gold); margin-right: 8px; transition: transform .2s; }
+    .row-group.closed td:first-child::before { transform: rotate(-90deg); }
+    .row-member { background: #FAFBFF !important; }
+    .row-member td:first-child { padding-left: 36px; font-weight: 400; color: var(--text-muted); }
+    .row-member td { font-size: 11px; }
+
+    /* BADGES */
+    .pct-badge { display: inline-flex; align-items: center; justify-content: center; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; min-width: 50px; }
+    .pct-green { background: var(--green-bg); color: var(--green); }
+    .pct-amber { background: var(--amber-bg); color: var(--amber); }
+    .pct-red   { background: var(--red-bg);   color: var(--red); }
+    .val-real  { color: var(--navy); font-weight: 600; }
+    .val-multi { color: #5B21B6; font-weight: 600; }
+    .deficit   { color: var(--red); }
+    .surplus   { color: var(--green); }
+    .badge-lider { font-size: 9px; font-weight: 700; background: var(--gold-bg); color: var(--gold); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+
+    /* AVATAR */
+    .avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 2px solid var(--gold); flex-shrink: 0; }
+    .avatar-initials { width: 28px; height: 28px; border-radius: 50%; background: var(--navy); border: 2px solid var(--gold); display: flex; align-items: center; justify-content: center; color: var(--gold); font-size: 9px; font-weight: 700; flex-shrink: 0; }
+    .name-cell { display: flex; align-items: center; gap: 8px; }
+
+    /* RESULTADO CARDS */
+    .resultados { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    .result-card { background: var(--white); border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 6px; padding: 12px 16px; min-width: 180px; flex: 1 1 180px; box-shadow: var(--shadow); }
+    .rc-nome { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+    .rc-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px; }
+    .rc-label { color: var(--text-muted); }
+    .rc-total { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700; }
+
+
+    .rc-section-label { font-size: 9px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; margin-top: 4px; }
+    .rc-val { font-weight: 600; color: var(--navy); font-size: 11px; }
+    .rc-val-multi { font-weight: 600; color: #5B21B6; font-size: 11px; }
+
+    .result-card-consolidated {
+      border-left: 3px solid var(--navy);
+      background: #F8F9FF;
+    }
+    .result-card-consolidated .rc-nome { color: var(--navy); }
+
+    .rc-bar { height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+    .rc-fill { height: 100%; border-radius: 3px; }
+
+    /* SECTION TITLE */
+    .section-title { font-size: 11px; font-weight: 700; color: var(--gold); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 16px; margin-top: 24px; display: flex; align-items: center; gap: 8px; }
+    .section-title::before { content: ''; width: 3px; height: 12px; background: var(--gold); border-radius: 2px; }
+
+    /* LOADING */
+    .loading { display: flex; align-items: center; justify-content: center; padding: 60px; gap: 12px; color: var(--text-muted); }
+    .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-state { padding: 40px; text-align: center; color: var(--red); }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="brand">
+      <div class="brand-bar"></div>
+      <div>
+        <div class="brand-text">BOARD ACADEMY</div>
+        <div class="brand-sub">Forecast Comercial</div>
+      </div>
+    </div>
+    <div class="periodo-badge" id="periodo-badge">Carregando...</div>
+  </div>
+  <div class="header-right">
+    <div class="filter-group">
+      <select id="sel-mes" onchange="fetchAbril()">
+        <option value="1">Janeiro</option><option value="2">Fevereiro</option>
+        <option value="3">Março</option><option value="4">Abril</option>
+        <option value="5">Maio</option><option value="6">Junho</option>
+        <option value="7">Julho</option><option value="8">Agosto</option>
+        <option value="9">Setembro</option><option value="10">Outubro</option>
+        <option value="11">Novembro</option><option value="12">Dezembro</option>
+      </select>
+      <select id="sel-ano" onchange="fetchAbril()">
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+      </select>
+    </div>
+    <span class="update-info" id="update-info"></span>
+    <a href="/logout" class="btn-logout">Sair ({{ nome }})</a>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <div class="tab active" onclick="setTab('abril')" id="tab-abril">Abril 2026</div>
+  <div class="tab" onclick="setTab('forecast')">Forecast Diário</div>
+  <div class="tab" id="tab-historico" style="display:none" onclick="setTab('historico')">Histórico</div>
+  <div class="tab" onclick="setTab('forecast-reunioes')">Forecast de Reuniões</div>
+  <div class="tab" id="tab-overview" style="display:none" onclick="setTab('overview')">Overview</div>
+</div>
+
+<div class="main">
+  <div class="panel active" id="panel-abril">
+    <div id="abril-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Buscando dados...</div></div>
+    </div>
+  </div>
+  <div class="panel" id="panel-forecast">
+    <div id="forecast-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast...</div></div>
+    </div>
+  </div>
+  <div class="panel" id="panel-historico">
+    <div id="historico-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>
+    </div>
+  </div>
+  <div class="panel" id="panel-forecast-reunioes">
+    <div id="fr-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast de reuniões...</div></div>
+    </div>
+  </div>
+  <div class="panel" id="panel-overview">
+    <div id="overview-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Carregando overview...</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const FOTO_BASE = "https://raw.githubusercontent.com/negocios87-sketch/fotos_time_comercial/main/";
+
+// ── TABS ──────────────────────────────────────────────────────
+
+function exportarGanhos() {
+  const mes = document.getElementById('sel-mes')?.value || '';
+  const ano = document.getElementById('sel-ano')?.value || '';
+  window.location.href = `/api/exportar-ganhos?mes=${mes}&ano=${ano}`;
+}
+
+function setTab(tab) {
+  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview'];
+  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
+  document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
+  if (tab === 'forecast') fetchForecast();
+  if (tab === 'historico') fetchHistorico();
+  if (tab === 'forecast-reunioes') fetchForecastReunioes();
+  if (tab === 'overview') fetchOverview();
+}
+
+// ── FORMAT ────────────────────────────────────────────────────
+const R = v => 'R$ ' + Number(v).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0});
+const P = v => v == null ? '—' : Number(v).toFixed(1) + '%';
+const N = v => Number(v).toLocaleString('pt-BR');
+
+function pctBadge(pct) {
+  if (pct == null) return '—';
+  const cls = pct >= 100 ? 'pct-green' : pct >= 60 ? 'pct-amber' : 'pct-red';
+  return `<span class="pct-badge ${cls}">${P(pct)}</span>`;
+}
+function defVal(v) {
+  return v <= 0 ? `<span class="surplus">${R(Math.abs(v))}</span>` : `<span class="deficit">${R(v)}</span>`;
+}
+function barColor(pct) { return pct >= 100 ? '#0D7A3E' : pct >= 60 ? '#B8860B' : '#B91C1C'; }
+
+// ── AVATAR ────────────────────────────────────────────────────
+function avatarHtml(nome) {
+  const initials = nome.split(' ').slice(0,2).map(p=>p[0]?.toUpperCase()||'').join('');
+  const id = 'av_' + nome.replace(/[^a-zA-Z0-9]/g,'_');
+  return `<img class="avatar" id="${id}" src="${FOTO_BASE}${encodeURIComponent(nome)}.jpg" alt="${nome}"
+    onerror="tryNextExt(this,'${encodeURIComponent(nome)}')">&nbsp;<div class="avatar-initials" id="${id}_fb" style="display:none">${initials}</div>`;
+}
+
+function tryNextExt(img, enc) {
+  const src = img.src;
+  if (src.includes('.jpg') && !src.includes('.jpeg')) { img.src = FOTO_BASE + enc + '.jpeg'; }
+  else if (src.includes('.jpeg')) { img.src = FOTO_BASE + enc + '.png'; }
+  else if (src.includes('.png') && !src.toLowerCase().includes('.jpg'.toLowerCase())) { img.src = FOTO_BASE + enc + '.JPG'; }
+  else {
+    img.style.display = 'none';
+    const fb = document.getElementById(img.id + '_fb');
+    if (fb) fb.style.display = 'flex';
+  }
+}
+
+// ── TOGGLE SEM/COM ────────────────────────────────────────────
+let modoMulti = false;
+function setModo(multi) {
+  modoMulti = multi;
+  document.querySelectorAll('.toggle-btn').forEach((b,i) => b.classList.toggle('active', i===(multi?1:0)));
+  document.querySelectorAll('.col-sem').forEach(el => el.style.display = multi ? 'none' : '');
+  document.querySelectorAll('.col-com').forEach(el => el.style.display = multi ? '' : 'none');
+}
+
+// ── EXPAND/COLLAPSE ───────────────────────────────────────────
+function toggleGroup(gid) {
+  const grp = document.querySelector(`[data-gid="${gid}"]`);
+  const members = document.querySelectorAll(`[data-mid="${gid}"]`);
+  const closing = !grp.classList.contains('closed');
+  grp.classList.toggle('closed', closing);
+  members.forEach(r => r.style.display = closing ? 'none' : '');
+}
+
+// ── CLOSER TABLE ──────────────────────────────────────────────
+function closerHeaders() {
+  return `
+    <thead>
+      <tr>
+        <th rowspan="2" style="text-align:left">Closer</th>
+        <th rowspan="2">Meta</th>
+        <th rowspan="2">DU</th>
+        <th rowspan="2">Meta/DU</th>
+        <th class="th-group col-sem" colspan="7">Sem Multiplicador</th>
+        <th class="th-group col-com" colspan="4" style="display:none">Com Multiplicador</th>
+        <th class="th-group" colspan="2">Performance</th>
+      </tr>
+      <tr>
+        <th class="col-sem">Realizado</th><th class="col-sem">% Ating.</th>
+        <th class="col-sem">MTD</th><th class="col-sem">Déf. MTD</th>
+        <th class="col-sem">% MTD</th><th class="col-sem">Déf. 100%</th>
+        <th class="col-sem">Meta/Dia</th>
+        <th class="col-com" style="display:none">Real c/Multi</th>
+        <th class="col-com" style="display:none">% c/Multi</th>
+        <th class="col-com" style="display:none">Déf. 100%</th>
+        <th class="col-com" style="display:none">Meta/Dia</th>
+        <th>Vol.</th><th>Ticket</th>
+      </tr>
+    </thead>`;
+}
+
+function closerRow(r, gid, isMember) {
+  const isHead = r.is_head;
+  const nomeLbl = isHead ? `${r.nome} <span class="badge-lider">LÍDER</span>` : r.nome;
+  const hasMeta = r.meta > 0;
+  const cls = isMember ? `row-member" data-mid="${gid}` : `row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')`;
+  return `<tr class="${cls}">
+    <td><div class="name-cell">${avatarHtml(r.nome)}<span>${nomeLbl}</span></div></td>
+    <td>${hasMeta ? R(r.meta) : '—'}</td>
+    <td>${N(r.dias_uteis)}</td>
+    <td>${hasMeta ? R(r.meta_du) : '—'}</td>
+    <td class="col-sem val-real">${R(r.realizado)}</td>
+    <td class="col-sem">${hasMeta ? pctBadge(r.pct_atingido) : '—'}</td>
+    <td class="col-sem">${hasMeta ? R(r.mtd) : '—'}</td>
+    <td class="col-sem">${hasMeta ? defVal(r.deficit_mtd) : '—'}</td>
+    <td class="col-sem">${hasMeta ? pctBadge(r.pct_mtd) : '—'}</td>
+    <td class="col-sem">${hasMeta ? defVal(r.deficit_meta) : '—'}</td>
+    <td class="col-sem">${hasMeta ? R(r.meta_dia_100) : '—'}</td>
+    <td class="col-com val-multi" style="display:none">${R(r.realizado_multi)}</td>
+    <td class="col-com" style="display:none">${hasMeta ? pctBadge(r.pct_atingido_multi) : '—'}</td>
+    <td class="col-com" style="display:none">${hasMeta ? defVal(r.deficit_meta_multi) : '—'}</td>
+    <td class="col-com" style="display:none">${hasMeta ? R(r.meta_dia_multi) : '—'}</td>
+    <td>${N(r.qtd_ganhos)}</td>
+    <td>${R(r.ticket_medio)}</td>
+  </tr>`;
+}
+
+function renderClosers(closers, total, squadIdx) {
+  if (!closers || !closers.length) return '';
+  const gid = `cg_${squadIdx}`;
+  let memberRows = '';
+  closers.forEach((r, i) => {
+    memberRows += closerRow(r, gid, true);
+  });
+  const totalRow = total ? `<tr class="row-total">
+    <td>TOTAL</td><td>${R(total.meta)}</td><td>${N(total.dias_uteis)}</td><td>${R(total.meta_du)}</td>
+    <td class="col-sem">${R(total.realizado)}</td><td class="col-sem">${pctBadge(total.pct_atingido)}</td>
+    <td class="col-sem">${R(total.mtd)}</td><td class="col-sem">${defVal(total.deficit_mtd)}</td>
+    <td class="col-sem">${pctBadge(total.pct_mtd)}</td><td class="col-sem">${defVal(total.deficit_meta)}</td>
+    <td class="col-sem">${R(total.meta_dia_100)}</td>
+    <td class="col-com" style="display:none">${R(total.realizado_multi)}</td>
+    <td class="col-com" style="display:none">${pctBadge(total.pct_atingido_multi)}</td>
+    <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
+    <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
+    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td>
+  </tr>` : '';
+  // Group header row (collapsible)
+  const groupRow = total ? `<tr class="row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')">
+    <td>Closers (${closers.length})</td><td>${R(total.meta)}</td><td>${N(total.dias_uteis)}</td><td>${R(total.meta_du)}</td>
+    <td class="col-sem val-real">${R(total.realizado)}</td><td class="col-sem">${pctBadge(total.pct_atingido)}</td>
+    <td class="col-sem">${R(total.mtd)}</td><td class="col-sem">${defVal(total.deficit_mtd)}</td>
+    <td class="col-sem">${pctBadge(total.pct_mtd)}</td><td class="col-sem">${defVal(total.deficit_meta)}</td>
+    <td class="col-sem">${R(total.meta_dia_100)}</td>
+    <td class="col-com val-multi" style="display:none">${R(total.realizado_multi)}</td>
+    <td class="col-com" style="display:none">${pctBadge(total.pct_atingido_multi)}</td>
+    <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
+    <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
+    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td>
+  </tr>` : '';
+  return `<div class="section">
+    <div class="card"><div class="table-scroll"><table>${closerHeaders()}<tbody>
+      ${groupRow}${memberRows}
+    </tbody></table></div></div>
+  </div>`;
+}
+
+// ── SDR TABLE ─────────────────────────────────────────────────
+function sdrRow(s, isMember, gid) {
+  const cls = isMember ? `row-member" data-mid="${gid}` : ``;
+  const sdrNomeLbl = s.is_lider ? `${s.nome} <span class="badge-lider">LÍDER</span>` : s.nome;
+  const nameCell = `<div class="name-cell">${avatarHtml(s.nome)}<span>${sdrNomeLbl}</span></div>`;
+  return `<tr class="${cls}">
+    <td>${nameCell}</td>
+    <td>${s.meta_reuniao > 0 ? N(s.meta_reuniao) : '—'}</td>
+    <td>${s.meta_diaria > 0 ? s.meta_diaria.toFixed(1) : '—'}</td>
+    <td>${N(s.validadas)}</td>
+    <td>${s.deveria_estar > 0 ? s.deveria_estar.toFixed(0) : '—'}</td>
+    <td>${s.meta_reuniao > 0 ? (s.faltam<=0?`<span class="surplus">${N(Math.abs(s.faltam))}</span>`:`<span class="deficit">${N(s.faltam)}</span>`) : '—'}</td>
+    <td>${s.meta_reuniao > 0 ? pctBadge(s.pct_reu) : '—'}</td>
+    <td>${s.meta_ganho > 0 ? R(s.meta_ganho) : '—'}</td>
+    <td>${N(s.qtd_ganhos)}</td>
+    <td>${R(s.valor_ganho)}</td><td class="val-multi">${R(s.valor_ganho_multi)}</td>
+    <td>${s.meta_ganho > 0 ? pctBadge(s.pct_ganhos) : '—'}</td>
+    <td>${R(s.ticket_medio)}</td>
+    <td>${s.meta_reuniao > 0 || s.meta_ganho > 0 ? pctBadge(s.pct_final) : '—'}</td>
+  </tr>`;
+}
+
+function renderSdrs(sdrs, total, squadIdx) {
+  if (!sdrs || !sdrs.length) return '';
+  const gid = `sg_${squadIdx}`;
+  let memberRows = sdrs.map((s,i) => sdrRow(s, true, gid)).join('');
+  const sdrHeaders = `<thead><tr>
+    <th style="text-align:left">SDR</th><th>Meta Reu.</th><th>Meta/Dia</th>
+    <th>Validadas</th><th>Deveria Estar</th><th>Faltam</th><th>% Reu.</th>
+    <th>Meta Ganho</th><th>Qtd</th><th>R$ Ganho</th><th>R$ c/Multi</th>
+    <th>% Ganhos</th><th>Ticket</th><th>% Final</th>
+  </tr></thead>`;
+  const groupRow = total ? `<tr class="row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')">
+    <td>SDR's (${sdrs.length})</td>
+    <td>${N(total.meta_reuniao)}</td><td>${total.meta_diaria.toFixed(1)}</td>
+    <td>${N(total.validadas)}</td><td>${total.deveria_estar.toFixed(0)}</td>
+    <td>${total.faltam<=0?'<span class="surplus">'+N(Math.abs(total.faltam))+'</span>':'<span class="deficit">'+N(total.faltam)+'</span>'}</td>
+    <td>${pctBadge(total.pct_reu)}</td>
+    <td>${R(total.meta_ganho)}</td><td>${N(total.qtd_ganhos)}</td>
+    <td>${R(total.valor_ganho)}</td><td class="val-multi">${R(total.valor_ganho_multi)}</td>
+    <td>${pctBadge(total.pct_ganhos)}</td><td>${R(total.ticket_medio)}</td>
+    <td>${pctBadge(total.pct_final)}</td>
+  </tr>` : '';
+  return `<div class="section">
+    <div class="card"><div class="table-scroll"><table>
+      ${sdrHeaders}<tbody>${groupRow}${memberRows}</tbody>
+    </table></div></div>
+  </div>`;
+}
+
+// ── RESULTADO CARDS ───────────────────────────────────────────
+function renderResultados(resultados) {
+  if (!resultados || !resultados.length) return '';
+  const cards = resultados.map(r => `
+    <div class="result-card${r.is_consolidated ? ' result-card-consolidated' : ''}">
+      <div class="rc-nome">${r.nome}${r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' : ''}</div>
+      <div class="rc-section-label">Closers</div>
+      <div class="rc-row"><span class="rc-label">Meta</span><span class="rc-val">${R(r.closer_meta)}</span></div>
+      <div class="rc-row"><span class="rc-label">MTD</span><span class="rc-val">${R(r.closer_mtd)}</span></div>
+      <div class="rc-row"><span class="rc-label">% MTD</span><span>${pctBadge(r.closer_pct_mtd)}</span></div>
+      <div class="rc-row"><span class="rc-label">% c/ Multi</span><span>${pctBadge(r.ating_closer)}</span></div>
+      <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.closer_bruto)}</span></div>
+      <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.closer_multi)}</span></div>
+      <div class="rc-row"><span class="rc-label">Vol. Ganhos</span><span class="rc-val">${N(r.closer_vol)}</span></div>
+      ${r.tem_sdr ? `
+      <div class="rc-section-label" style="margin-top:8px">SDR's</div>
+      <div class="rc-row"><span class="rc-label">Meta Reunião</span><span class="rc-val">${N(r.sdr_meta_reu)}</span></div>
+      <div class="rc-row"><span class="rc-label">Meta Financeira</span><span class="rc-val">${R(r.sdr_meta_fin)}</span></div>
+      <div class="rc-row"><span class="rc-label">% Final</span><span>${pctBadge(r.ating_sdr)}</span></div>
+      <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.sdr_bruto)}</span></div>
+      <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.sdr_multi)}</span></div>
+      <div class="rc-row"><span class="rc-label">Reuniões Valid.</span><span class="rc-val">${N(r.sdr_reunioes)}</span></div>` : ''}
+      <div class="rc-total"><span>Resultado</span><span>${pctBadge(r.resultado)}</span></div>
+      <div class="rc-bar"><div class="rc-fill" style="width:${Math.min(r.resultado,100)}%;background:${barColor(r.resultado)}"></div></div>
+    </div>`).join('');
+  return `<div class="section-title">Resultado por Squad</div><div class="resultados">${cards}</div>`;
+}
+
+// ── MAIN RENDER ───────────────────────────────────────────────
+function renderAbril(data) {
+  const p = data.periodo;
+  const selMes = document.getElementById('sel-mes');
+  const selAno = document.getElementById('sel-ano');
+  if (selMes) selMes.value = p.mes;
+  if (selAno) selAno.value = p.ano;
+
+  const tabEl = document.getElementById('tab-abril');
+  if (tabEl) tabEl.textContent = `${MESES[p.mes-1]} ${p.ano}`;
+
+  document.getElementById('periodo-badge').innerHTML =
+    `${MESES[p.mes-1]} ${p.ano} &nbsp;·&nbsp; <strong>${p.du_passados}</strong>/${p.du_total} dias úteis &nbsp;·&nbsp; <strong>${p.du_restantes}</strong> restantes`;
+  document.getElementById('update-info').textContent = `Atualizado: ${p.atualizado_em}`;
+
+  let html = `<div class="section-header" style="margin-bottom:16px">
+    <button onclick="exportarGanhos()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px">↓ Exportar Ganhos CSV</button>
+    <div class="toggle-group">
+      <button class="toggle-btn active" onclick="setModo(false)">Sem Multiplicador</button>
+      <button class="toggle-btn" onclick="setModo(true)">Com Multiplicador</button>
+    </div>
+  </div>`;
+
+  (data.squads || []).forEach((sq, i) => {
+    html += `<div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${sq.nome}</div>
+        <div class="squad-divider"></div>
+      </div>
+      ${renderSdrs(sq.sdrs, sq.sdr_total, i)}
+      ${renderClosers(sq.closers, sq.closer_total, i)}
+    </div>`;
+  });
+
+  html += renderResultados(data.resultados);
+
+  document.getElementById('abril-content').innerHTML = html;
+  if (modoMulti) setModo(true);
+}
+
+// ── FETCH ─────────────────────────────────────────────────────
+async function fetchAbril() {
+  document.getElementById('abril-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Buscando dados...</div></div>';
+  try {
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/abril?mes=${mes}&ano=${ano}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderAbril(data);
+  } catch(e) {
+    document.getElementById('abril-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+
+// ── FORECAST ──────────────────────────────────────────────────
+function toggleFcCloser(gid) {
+  const grp = document.querySelector(`tr[data-fc-cgid="${gid}"]`);
+  const members = document.querySelectorAll(`tr[data-fc-cmid="${gid}"]`);
+  if (!grp) return;
+  const opening = !grp.classList.contains('fc-c-open');
+  grp.classList.toggle('fc-c-open', opening);
+  members.forEach(r => r.style.display = opening ? 'table-row' : 'none');
+}
+
+function toggleFcDay(gid) {
+  const grp = document.querySelector(`[data-fc-gid="${gid}"]`);
+  const members = document.querySelectorAll(`[data-fc-mid="${gid}"]`);
+  const closing = !grp.classList.contains('fc-open');
+  grp.classList.toggle('fc-open', closing);
+  members.forEach(r => r.style.display = closing ? 'table-row' : 'none');
+}
+
+function pctBadgeFc(pct) {
+  if (pct == null) return '<span style="color:var(--text-muted)">—</span>';
+  const cls = pct >= 100 ? 'pct-green' : pct >= 60 ? 'pct-amber' : 'pct-red';
+  return `<span class="pct-badge ${cls}">${pct.toFixed(1)}%</span>`;
+}
+
+function renderForecast(data) {
+  const squads = data.squads || {};
+  if (!Object.keys(squads).length) {
+    document.getElementById('forecast-content').innerHTML =
+      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum dado encontrado.</div></div>';
+    return;
+  }
+
+  const COLS = ['Dia','20%','50%','70%','Média Prev.','Em Aberto','Realizado','Perda','Total Prev.','% Ating.'];
+
+  let html = '';
+  Object.entries(squads).forEach(([squad, sq]) => {
+    const rows = sq.rows || [];
+    const tot  = sq.total || {};
+    let tbody = '';
+
+    rows.forEach((row, i) => {
+      const gid = `fc_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
+      // Day group row
+      const todayStr = new Date().toISOString().slice(0,10);
+      const isPast    = row.dia < todayStr;
+      const isToday   = row.dia === todayStr;
+      const diaLabel  = row.dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
+      const pctCell   = row.atingimento != null
+        ? (isPast
+            ? `<span class="pct-badge pct-${row.atingimento>=100?'green':row.atingimento>=60?'amber':'red'} fc-past">${row.atingimento.toFixed(1)}%</span>`
+            : pctBadgeFc(row.atingimento))
+        : '—';
+      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${isToday ? 'background:#FFFBEB !important;border-left:3px solid var(--gold);' : ''}">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
+        <td class="col-fc">${R(row.p20)}</td>
+        <td class="col-fc">${R(row.p50)}</td>
+        <td class="col-fc">${R(row.p70)}</td>
+        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(row.media)}</td>
+        <td class="col-fc fc-gray">${R(row.em_aberto)}</td>
+        <td class="col-fc fc-gray" style="color:${row.realizado>0?'var(--green)':'var(--text-muted)'} !important">${R(row.realizado)}</td>
+        <td class="col-fc fc-gray" style="color:${row.perda>0?'var(--red)':'var(--text-muted)'} !important">${R(row.perda)}</td>
+        <td class="col-fc fc-total-bold">${R(row.total_previsto)}</td>
+        <td class="col-fc">${pctCell}</td>
+      </tr>`;
+
+      // Closer member rows (hidden by default)
+      (row.closers || []).forEach((c, ci) => {
+        const cgid = `${gid}_c${ci}`;
+        const hasDeals = c.deals && c.deals.length > 0;
+        tbody += `<tr class="row-member${hasDeals ? ' row-group' : ''}" data-fc-mid="${gid}" ${hasDeals ? `data-fc-cgid="${cgid}" onclick="toggleFcCloser('${cgid}')"` : ''} style="display:none">
+          <td style="padding-left:${hasDeals ? '28px' : '36px'}">
+            <div class="name-cell">${avatarHtml(c.nome)}<span style="color:var(--text-muted);font-size:11px">${c.nome}</span></div>
+          </td>
+          <td class="col-fc" style="font-size:11px">${R(c.p20)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.p50)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.p70)}</td>
+          <td class="col-fc val-real" style="font-size:11px">${R(c.media)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.em_aberto)}</td>
+          <td class="col-fc" style="font-size:11px;color:${c.realizado>0?'var(--green)':'var(--text-muted)'}">${R(c.realizado)}</td>
+          <td class="col-fc" style="font-size:11px;color:${c.perda>0?'var(--red)':'var(--text-muted)'}">${R(c.perda)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.total_previsto)}</td>
+          <td class="col-fc" style="font-size:11px">${pctBadgeFc(c.atingimento)}</td>
+        </tr>`;
+        // Deal rows (hidden by default)
+        (c.deals || []).forEach(deal => {
+          const statusColor = deal.status === 'won' ? 'var(--green)' : deal.status === 'lost' ? 'var(--red)' : 'var(--text-muted)';
+          const statusLabel = deal.status === 'won' ? 'Ganho' : deal.status === 'lost' ? 'Perdido' : 'Aberto';
+          tbody += `<tr data-fc-cmid="${cgid}" style="display:none;background:#FAFBFE">
+            <td style="padding-left:52px;font-size:11px;font-weight:400;color:var(--text-muted)">
+              <a href="https://boardacademy.pipedrive.com/deal/${deal.id}" target="_blank" style="color:var(--gold);font-size:10px;margin-right:6px;text-decoration:none">#${deal.id}</a>${deal.titulo}
+            </td>
+            <td class="col-fc" style="font-size:10px;color:var(--text-muted)">${deal.probabilidade ? deal.probabilidade + '%' : '—'}</td>
+            <td class="col-fc" colspan="2" style="font-size:10px;color:${statusColor};font-weight:600">${statusLabel}</td>
+            <td class="col-fc" colspan="2"></td>
+            <td class="col-fc" style="font-size:11px;color:${statusColor};font-weight:600">${R(deal.valor)}</td>
+            <td class="col-fc" colspan="3"></td>
+          </tr>`;
+        });
+      });
+    });
+
+    // Total row
+    tbody += `<tr class="row-total">
+      <td>TOTAL</td>
+      <td>${R(tot.p20)}</td><td>${R(tot.p50)}</td><td>${R(tot.p70)}</td>
+      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${R(tot.media)}</td>
+      <td style="color:var(--text-muted)">${R(tot.em_aberto)}</td>
+      <td style="color:${tot.realizado>0?'var(--green)':'var(--text-muted)'}">${R(tot.realizado)}</td>
+      <td style="color:${tot.perda>0?'var(--red)':'var(--text-muted)'}">${R(tot.perda)}</td>
+      <td style="font-weight:700;color:var(--navy)">${R(tot.total_previsto)}</td>
+      <td>${pctBadgeFc(tot.atingimento)}</td>
+    </tr>`;
+
+    html += `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${squad}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:110px">Dia</th>
+              <th>20%</th><th>50%</th><th>70%</th>
+              <th style="background:rgba(13,122,62,.15)">Média Prev.</th>
+              <th style="color:#9CA3AF">Em Aberto</th>
+              <th style="color:#9CA3AF">Realizado</th>
+              <th style="color:#9CA3AF">Perda</th>
+              <th style="color:#9CA3AF">Total Prev.</th>
+              <th>% Ating.</th>
+            </tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
+  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
+  document.getElementById('forecast-content').innerHTML = html;
+}
+
+async function fetchForecast() {
+  document.getElementById('forecast-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast...</div></div>';
+  try {
+    const res = await fetch('/api/forecast');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderForecast(data);
+  } catch(e) {
+    document.getElementById('forecast-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+// Add CSS for fc columns
+const fcStyle = document.createElement('style');
+fcStyle.textContent = '.col-fc { text-align:right; white-space:nowrap; padding:10px 12px; } .row-group.fc-open td:first-child::before { transform:rotate(90deg); }';
+document.head.appendChild(fcStyle);
+
+
+// ── SNAPSHOT / HISTÓRICO ─────────────────────────────────────
+const IS_MASTER = {{ "true" if is_master else "false" }};
+
+async function salvarSnapshot(force=false) {
+  const url = force ? '/api/snapshot/sobrepor' : '/api/snapshot';
+  const res = await fetch(url, {method:'POST'});
+  const data = await res.json();
+  if (data.existe && !force) {
+    if (confirm(`Já existe um snapshot para hoje (${data.data}). Deseja sobrepor?`)) {
+      salvarSnapshot(true);
+    }
+    return;
+  }
+  if (data.ok) {
+    alert(`✅ Snapshot de ${data.data} salvo com sucesso!`);
+    fetchHistorico();
+  } else {
+    alert('Erro: ' + (data.erro || 'desconhecido'));
+  }
+}
+
+function renderHistorico(data) {
+  const snapshots = data.snapshots || {};
+  const datas = data.datas || [];
+
+  if (!datas.length) {
+    document.getElementById('historico-content').innerHTML =
+      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum snapshot encontrado. Salve o primeiro!</div></div>';
+    return;
+  }
+
+  const allSquads = [...new Set(datas.flatMap(d => Object.keys(snapshots[d] || {})))].sort();
+
+  let html = '';
+  allSquads.forEach(squad => {
+    const allDays = [...new Set(datas.flatMap(d => Object.keys((snapshots[d] || {})[squad] || {})))].sort();
+    if (!allDays.length) return;
+
+    let tbody = '';
+    allDays.forEach((dia, i) => {
+      const snapDate = datas.find(d => (snapshots[d] || {})[squad]?.[dia]);
+      if (!snapDate) return;
+      const row = snapshots[snapDate][squad][dia];
+      const gid = `h_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
+
+      const todayStr = new Date().toISOString().slice(0,10);
+      const isToday  = dia === todayStr;
+      const diaLabel = dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
+
+      const media     = row.media_prevista || 0;
+      const realizada = row.ganho || 0;
+      const pctAting  = media > 0 ? arred(realizada / media * 100) : null;
+
+      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${isToday?'background:#FFFBEB !important;border-left:3px solid var(--gold);':''}">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
+        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(media)}</td>
+        <td class="col-fc" style="color:var(--green);font-weight:600">${R(realizada)}</td>
+        <td class="col-fc">${pctAting != null ? pctBadgeFc(pctAting) : '—'}</td>
+      </tr>`;
+
+      Object.entries(row.closers || {}).forEach(([ cname, cv ]) => {
+        const cMedia     = cv.media_prevista || 0;
+        const cRealizada = cv.ganho || 0;
+        const cPct       = cMedia > 0 ? arred(cRealizada / cMedia * 100) : null;
+        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
+          <td style="padding-left:36px"><div class="name-cell">${avatarHtml(cname)}<span style="color:var(--text-muted);font-size:11px">${cname}</span></div></td>
+          <td class="col-fc fc-media-val" style="font-size:11px;background:rgba(13,122,62,.03)">${R(cMedia)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--green)">${R(cRealizada)}</td>
+          <td class="col-fc" style="font-size:11px">${cPct != null ? pctBadgeFc(cPct) : '—'}</td>
+        </tr>`;
+      });
+    });
+
+    const totM = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].media_prevista||0):0); }, 0);
+    const totG = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].ganho||0):0); }, 0);
+    const totPct = totM > 0 ? arred(totG/totM*100) : null;
+
+    tbody += `<tr class="row-total">
+      <td>TOTAL</td>
+      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${R(totM)}</td>
+      <td style="color:var(--green);font-weight:700">${R(totG)}</td>
+      <td>${totPct!=null?pctBadgeFc(totPct):'—'}</td>
+    </tr>`;
+
+    html += `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${squad}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:110px">Dia</th>
+              <th style="background:rgba(13,122,62,.15)">Média Prevista</th>
+              <th style="color:#6EE7B7">Realizada</th>
+              <th>% Atingimento</th>
+            </tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
+  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
+  document.getElementById('historico-content').innerHTML = html;
+}
+async function fetchHistorico() {
+  document.getElementById('historico-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>';
+  try {
+    const res = await fetch('/api/historico');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderHistorico(data);
+  } catch(e) {
+    document.getElementById('historico-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+function arred(v) { try { return Math.round(parseFloat(v) * 100) / 100; } catch(e) { return 0; } }
+
+
+// ── FORECAST DE REUNIÕES ─────────────────────────────────────
+function toggleFrDay(gid) {
+  const grp = document.querySelector(`tr[data-fr-gid="${gid}"]`);
+  const members = document.querySelectorAll(`tr[data-fr-mid="${gid}"]`);
+  if (!grp) return;
+  const opening = !grp.classList.contains('fr-open');
+  grp.classList.toggle('fr-open', opening);
+  members.forEach(r => r.style.display = opening ? 'table-row' : 'none');
+}
+
+function renderForecastReunioes(data) {
+  const squads = data.squads || {};
+  if (!Object.keys(squads).length) {
+    document.getElementById('fr-content').innerHTML =
+      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum dado encontrado.</div></div>';
+    return;
+  }
+
+  const todayStr = new Date().toISOString().slice(0,10);
+  let html = '';
+
+  Object.entries(squads).forEach(([squad, sq]) => {
+    const rows = sq.rows || [];
+    const tot  = sq.total  || {};
+    let tbody = '';
+
+    rows.forEach((row, i) => {
+      const gid = `fr_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
+      const isPast   = row.dia < todayStr;
+      const isToday  = row.dia === todayStr;
+      const diaLabel = row.dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
+      const pctCell  = row.pct != null ? pctBadgeFc(row.pct) : '—';
+      const nsCell   = row.no_show != null ? `<span style="color:var(--red)">${N(row.no_show)}</span>` : '—';
+      const gapCell  = row.gap > 0 ? `<span style="color:var(--red)">${N(row.gap)}</span>` : `<span style="color:var(--green)">${N(Math.abs(row.gap))}</span>`;
+
+      tbody += `<tr class="row-group" data-fr-gid="${gid}" onclick="toggleFrDay('${gid}')" style="cursor:pointer;${isToday?'background:#FFFBEB !important;border-left:3px solid var(--gold);':''}">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
+        <td class="col-fc" style="background:rgba(13,122,62,.05);color:var(--green);font-weight:600">${N(row.prevista)}</td>
+        <td class="col-fc">${N(row.ag_no_dia)}</td>
+        <td class="col-fc" style="color:var(--text-muted)">${N(row.ag_p_outros)}</td>
+        <td class="col-fc" style="color:var(--green)">${N(row.realizada)}</td>
+        <td class="col-fc">${nsCell}</td>
+        <td class="col-fc">${gapCell}</td>
+        <td class="col-fc">${pctCell}</td>
+      </tr>`;
+
+      // SDR rows (visible by default)
+      (row.sdrs || []).forEach(s => {
+        const sNomeLbl = s.is_lider ? `${s.nome} <span class="badge-lider">LÍDER</span>` : s.nome;
+        const sNs   = s.no_show != null ? `<span style="color:var(--red);font-size:11px">${N(s.no_show)}</span>` : '—';
+        const sGap  = s.gap > 0 ? `<span style="color:var(--red);font-size:11px">${N(s.gap)}</span>` : `<span style="color:var(--green);font-size:11px">${N(Math.abs(s.gap))}</span>`;
+        tbody += `<tr class="row-member" data-fr-mid="${gid}" style="display:none">
+          <td style="padding-left:32px">
+            <div class="name-cell">${avatarHtml(s.nome)}<span style="font-size:11px">${sNomeLbl}</span></div>
+          </td>
+          <td class="col-fc" style="font-size:11px;background:rgba(13,122,62,.03);color:var(--green)">${N(s.prevista)}</td>
+          <td class="col-fc" style="font-size:11px">${N(s.ag_no_dia)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--text-muted)">${N(s.ag_p_outros)}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--green)">${N(s.realizada)}</td>
+          <td class="col-fc" style="font-size:11px">${sNs}</td>
+          <td class="col-fc" style="font-size:11px">${sGap}</td>
+          <td class="col-fc" style="font-size:11px">${s.pct != null ? pctBadgeFc(s.pct) : '—'}</td>
+        </tr>`;
+      });
+    });
+
+    // Total row
+    const tGap = tot.gap > 0 ? `<span style="color:var(--red)">${N(tot.gap)}</span>` : `<span style="color:var(--green)">${N(Math.abs(tot.gap||0))}</span>`;
+    tbody += `<tr class="row-total">
+      <td>TOTAL</td>
+      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${N(tot.prevista||0)}</td>
+      <td>${N(tot.ag_no_dia||0)}</td>
+      <td style="color:var(--text-muted)">${N(tot.ag_p_outros||0)}</td>
+      <td style="color:var(--green);font-weight:700">${N(tot.realizada||0)}</td>
+      <td>—</td>
+      <td>${tGap}</td>
+      <td>${tot.pct!=null?pctBadgeFc(tot.pct):'—'}</td>
+    </tr>`;
+
+    html += `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${squad}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:120px">Dia</th>
+              <th style="background:rgba(13,122,62,.15)">Prevista</th>
+              <th>Ag. no Dia</th>
+              <th style="color:#9CA3AF">Ag. p/ Outros</th>
+              <th style="color:#6EE7B7">Realizada</th>
+              <th style="color:#FCA5A5">No Show</th>
+              <th>Gap</th>
+              <th>% Ating.</th>
+            </tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;margin-top:8px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
+  document.getElementById('fr-content').innerHTML = html;
+
+  // Add CSS for fr rows open arrow
+  if (!document.getElementById('fr-style')) {
+    const s = document.createElement('style');
+    s.id = 'fr-style';
+    s.textContent = '.row-group.fr-open td:first-child::before { transform:rotate(0deg); } .row-group:not(.fr-open) td:first-child::before { transform:rotate(-90deg); }';
+    document.head.appendChild(s);
+  }
+}
+
+async function fetchForecastReunioes() {
+  document.getElementById('fr-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast de reuniões...</div></div>';
+  try {
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/forecast-reunioes?mes=${mes}&ano=${ano}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderForecastReunioes(data);
+  } catch(e) {
+    document.getElementById('fr-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+
+// ── OVERVIEW (JACARÉ) ─────────────────────────────────────────
+const OV_CHARTS = {};
+
+function destroyChart(id) {
+  if (OV_CHARTS[id]) { OV_CHARTS[id].destroy(); delete OV_CHARTS[id]; }
+}
+
+function fmtBRL(v) {
+  if (v == null) return '—';
+  if (v >= 1000000) return 'R$ ' + (v/1000000).toFixed(2).replace('.',',') + 'M';
+  if (v >= 1000)    return 'R$ ' + (v/1000).toFixed(1).replace('.',',') + 'k';
+  return 'R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
+}
+
+function criarGrafico(canvasId, squad, dias, metaTotal) {
+  destroyChart(canvasId);
+  const todayFull  = new Date().toISOString().slice(0,10);
+  const labels     = dias.map(d => d.dia.slice(8));
+  const metaLine   = dias.map(d => d.meta_mtd);
+  const realLine   = dias.map(d => d.real_mtd);
+  const todayIdx   = dias.findIndex(d => d.dia === todayFull);
+  const lastIdx    = dias.length - 1;
+
+  // Pontos especiais: dia 1, 5, 10, 15, 20, 25, último
+  const labelDays  = new Set([0, ...dias.map((d,i) => parseInt(labels[i]) % 5 === 0 ? i : -1).filter(i => i >= 0), lastIdx]);
+
+  // Cores dos pontos da linha real
+  const pointColors = realLine.map((v, i) => {
+    if (i === todayIdx) return '#F5C518';
+    return v >= metaLine[i] ? '#F5C518' : '#B91C1C';
+  });
+
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  OV_CHARTS[canvasId] = new Chart(ctx.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Meta MTD',
+          data: metaLine,
+          borderColor: 'rgba(245,197,24,.5)',
+          borderWidth: 2,
+          borderDash: [5, 4],
+          pointRadius: dias.map((d,i) => labelDays.has(i) ? 4 : 0),
+          pointBackgroundColor: 'rgba(245,197,24,.7)',
+          pointBorderColor: '#1A1A2E',
+          pointBorderWidth: 1.5,
+          pointHoverRadius: 7,
+          pointHoverBackgroundColor: '#F5C518',
+          tension: 0,
+          fill: false,
+          order: 2,
+          // Rótulos a cada 5 dias
+          datalabels: {
+            display: (ctx) => labelDays.has(ctx.dataIndex),
+            color: 'rgba(245,197,24,.8)',
+            font: { size: 9, weight: '600' },
+            anchor: 'end', align: 'top',
+            formatter: v => fmtBRL(v),
+          }
         },
-        "squads": squads_out,
-        "resultados": squads_result,
-        "total_geral": {"closer": total_geral_c, "sdr": total_geral_s},
-    }
-
-# ── ROTAS ─────────────────────────────────────────────────────
-@app.route("/")
-def index():
-    return redirect("/login" if "nome" not in session else "/abril")
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        usuario = request.form.get("usuario", "").strip()
-        senha   = request.form.get("senha",   "").strip()
-        nome    = buscar_usuario(usuario, senha)
-        if nome:
-            session["nome"] = nome
-            return redirect("/abril")
-        return render_template("login.html", erro="Usuário ou senha inválidos"), 401
-    return render_template("login.html", erro=None)
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/login")
-
-@app.route("/abril")
-def abril():
-    if "nome" not in session: return redirect("/login")
-    return render_template("abril.html", nome=session["nome"], is_master=is_master(session["nome"]))
-
-@app.route("/api/abril")
-def api_abril():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        mes  = request.args.get("mes", type=int)
-        ano  = request.args.get("ano", type=int)
-        nome_sess = session.get("nome", "")
-        colab_df  = buscar_colaboradores()
-        head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
-        nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        nn_sess = norm(nome_sess)
-        if nn_sess in superusers:
-            head_filter = None
-        else:
-            is_head = False
-            if head_col:
-                for _, row in colab_df.iterrows():
-                    if norm(str(row.get(head_col, ""))) == nn_sess:
-                        is_head = True
-                        break
-            if is_head:
-                head_filter = nome_sess
-            else:
-                lider_col_l = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                is_lider = False
-                lider_sub = None
-                if lider_col_l:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col_l, ""))) == nn_sess:
-                            sub = str(row.get(sub_col if (sub_col := next((c for c in colab_df.columns if norm(c) == "subarea"), None)) else "Subarea", "")).strip()
-                            if sub:
-                                lider_sub = sub
-                                is_lider = True
-                            break
-                head_filter = f"__squad__:{lider_sub}" if is_lider and lider_sub else "__none__"
-        return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano, head_filter=head_filter)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-@app.route("/api/debug/metas")
-def debug_metas():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    hoje = date.today()
-    df = ler_sheet(URL_METAS)
-    return jsonify({"colunas": list(df.columns), "primeiras_5_linhas": df.head(5).fillna("").to_dict(orient="records"), "mes_ano": f"{hoje.month}/{hoje.year}"})
-
-@app.route("/api/debug/colab")
-def debug_colab():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    df = ler_sheet(URL_COLAB)
-    return jsonify({"colunas": list(df.columns), "primeiras_5_linhas": df.head(5).fillna("").to_dict(orient="records")})
-
-@app.route("/api/exportar-ganhos")
-def exportar_ganhos():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    import csv, io
-    try:
-        mes = request.args.get("mes", type=int) or date.today().month
-        ano = request.args.get("ano", type=int) or date.today().year
-        deals = buscar_deals_mes(mes, ano)
-        resp_pipes = req.get(f"{BASE_V1}/pipelines", params={"api_token": API_KEY}, timeout=15)
-        pipes = {p["id"]: p["name"] for p in (resp_pipes.json().get("data") or [])}
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["ID","Título","Proprietário","Squad","Funil","Data Criação","Data Ganho","Valor Bruto","Valor c/ Multiplicador"])
-        colab_df  = buscar_colaboradores(mes=mes, ano=ano)
-        sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-        nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-        nome_to_sub = {norm(str(row.get(nome_col,""))): str(row.get(sub_col,"")).strip() for _, row in colab_df.iterrows()} if sub_col else {}
-        for d in deals:
-            uid = d.get("user_id")
-            owner = uid.get("name","") if isinstance(uid, dict) else ""
-            writer.writerow([d["id"], d.get("title",""), owner, nome_to_sub.get(norm(owner),""), pipes.get(d.get("pipeline_id"),""), str(d.get("add_time",""))[:10], won_time_br(d)[:10], f"R$ {float(d.get('value') or 0):,.0f}".replace(",","."), f"R$ {float(cf(d,CF_MULTIPLICADOR) or 0):,.0f}".replace(",",".")])
-        output.seek(0)
-        from flask import Response
-        return Response("\ufeff"+output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=ganhos_{mes:02d}_{ano}.csv"})
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-# ── FORECAST DIÁRIO ───────────────────────────────────────────
-FILTER_FORECAST = int(os.environ.get("FILTER_FORECAST", "1490240"))
-
-def buscar_deals_forecast():
-    todos, cursor = [], None
-    users_pipe = buscar_users_pipe()
-    while True:
-        params = {"filter_id": FILTER_FORECAST, "limit": 500}
-        if cursor: params["cursor"] = cursor
-        resp = req.get(f"{BASE_V2}/deals", params=params, headers={"x-api-token": API_KEY}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for deal in lote:
-            oid = deal.get("owner_id")
-            deal["owner_name"] = users_pipe.get(oid, "") if oid else ""
-        todos.extend(lote)
-        cursor = (data.get("additional_data") or {}).get("next_cursor")
-        if not cursor or not lote: break
-    return todos
-
-def calcular_forecast(head_filter=None):
-    from collections import defaultdict
-    hoje_fc = date.today()
-    colab_df  = buscar_colaboradores(mes=hoje_fc.month, ano=hoje_fc.year)
-    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
-    nome_to_subarea = {}
-    nome_to_head    = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        hd  = str(row.get(head_col, "")).strip() if head_col else ""
-        nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = hd
-    if head_filter and not head_filter.startswith("__"):
-        head_nn = norm(head_filter)
-        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items() if norm(nome_to_head.get(nn, "")) == head_nn and sub}
-    elif head_filter and head_filter.startswith("__squad__:"):
-        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
-    else:
-        squads_visiveis = None
-    deals = buscar_deals_forecast()
-    by_squad = defaultdict(lambda: defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0,"closers":defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0})}))
-    for deal in deals:
-        status = deal.get("status")
-        date_fc = str(deal.get("won_time") or deal.get("close_time") or "")[:10] if status == "won" else deal.get("expected_close_date")
-        if not date_fc: continue
-        owner = (deal.get("owner_name") or "").strip()
-        owner_nn = norm(owner)
-        subarea = nome_to_subarea.get(owner_nn, "")
-        if not subarea: continue
-        if squads_visiveis and norm(subarea) not in squads_visiveis: continue
-        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
-        value = float(deal.get("value") or 0)
-        probability = deal.get("probability")
-        d = by_squad[sub_display][date_fc]
-        c = d["closers"][owner]
-        if "deals" not in c: c["deals"] = []
-        c["deals"].append({"id": deal.get("id"), "titulo": deal.get("title",""), "valor": arred(value), "probabilidade": probability, "status": status})
-        if status == "won":
-            d["realizado"] += value; c["realizado"] += value
-        elif status == "lost":
-            d["perda"] += value; c["perda"] += value
-        else:
-            if probability == 20: d["p20"] += value; c["p20"] += value
-            elif probability == 50: d["p50"] += value; c["p50"] += value
-            elif probability == 70: d["p70"] += value; c["p70"] += value
-    result = {}
-    for squad, days in by_squad.items():
-        rows = []
-        for dt in sorted(days.keys()):
-            d = days[dt]
-            media = d["p20"]*0.20+d["p50"]*0.50+d["p70"]*0.70
-            em_aberto = d["p20"]+d["p50"]+d["p70"]
-            total_prev = em_aberto+d["realizado"]+d["perda"]
-            ating = arred(d["realizado"]/total_prev*100) if total_prev > 0 else None
-            closers_list = []
-            for cname, cv in d["closers"].items():
-                c_media = cv["p20"]*0.20+cv["p50"]*0.50+cv["p70"]*0.70
-                c_em_ab = cv["p20"]+cv["p50"]+cv["p70"]
-                c_total = c_em_ab+cv["realizado"]+cv["perda"]
-                c_ating = arred(cv["realizado"]/c_total*100) if c_total > 0 else None
-                closers_list.append({"nome":cname,"p20":arred(cv["p20"]),"p50":arred(cv["p50"]),"p70":arred(cv["p70"]),"media":arred(c_media),"em_aberto":arred(c_em_ab),"realizado":arred(cv["realizado"]),"perda":arred(cv["perda"]),"total_previsto":arred(c_total),"atingimento":c_ating,"deals":cv.get("deals",[])})
-            closers_list.sort(key=lambda x: -(x["realizado"]+x["media"]))
-            rows.append({"dia":dt,"p20":arred(d["p20"]),"p50":arred(d["p50"]),"p70":arred(d["p70"]),"media":arred(media),"em_aberto":arred(em_aberto),"realizado":arred(d["realizado"]),"perda":arred(d["perda"]),"total_previsto":arred(total_prev),"atingimento":ating,"closers":closers_list})
-        t = {k: sum(r[k] for r in rows) for k in ["p20","p50","p70","media","em_aberto","realizado","perda","total_previsto"]}
-        t_ating = arred(t["realizado"]/t["total_previsto"]*100) if t["total_previsto"] else None
-        result[squad] = {"rows": rows, "total": {**{k:arred(v) for k,v in t.items()}, "atingimento": t_ating}}
-    return {"squads": result, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}
-
-@app.route("/api/forecast")
-def api_forecast():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        nome_sess = session.get("nome", "")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        if norm(nome_sess) in superusers:
-            head_filter = None
-        else:
-            colab_df = buscar_colaboradores()
-            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
-            if is_head:
-                head_filter = nome_sess
-            else:
-                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                lider_sub = None
-                if lider_col:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
-                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
-                            break
-                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
-        return jsonify(limpar_nans(calcular_forecast(head_filter=head_filter)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-# ── HISTÓRICO / SNAPSHOT ──────────────────────────────────────
-def is_master(nome_sess):
-    masters = {norm(u.strip()) for u in MASTERS_RAW.split(",")}
-    return norm(nome_sess) in masters
-
-def github_get_file(path):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
-    resp = req.get(url, headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}, timeout=15)
-    if resp.status_code == 404: return None, None
-    resp.raise_for_status()
-    data = resp.json()
-    import base64
-    decoded = base64.b64decode(data["content"]).decode("utf-8")
-    return decoded, data["sha"]
-
-def github_put_file(path, content_str, sha=None, message="snapshot"):
-    import base64
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
-    body = {"message": message, "content": base64.b64encode(content_str.encode("utf-8")).decode("utf-8"), "branch": GITHUB_BRANCH}
-    if sha: body["sha"] = sha
-    resp = req.put(url, json=body, headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
-
-def calcular_snapshot():
-    import json
-    hoje_fc = date.today()
-    colab_df = buscar_colaboradores(mes=hoje_fc.month, ano=hoje_fc.year)
-    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    nome_to_subarea = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        nome_to_subarea[nn] = sub
-    deals = buscar_deals_forecast()
-    from collections import defaultdict
-    snapshot = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-    for deal in deals:
-        if deal.get("status") != "open": continue
-        date_fc = deal.get("expected_close_date")
-        if not date_fc: continue
-        if date_fc != hoje_fc.strftime("%Y-%m-%d"): continue
-        owner    = (deal.get("owner_name") or "").strip()
-        owner_nn = norm(owner)
-        subarea  = nome_to_subarea.get(owner_nn, "")
-        if not subarea: continue
-        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
-        snapshot[sub_display][date_fc][owner].append({"id": deal.get("id"), "titulo": deal.get("title",""), "valor": arred(float(deal.get("value") or 0)), "probabilidade": deal.get("probability"), "expected_close_date_original": date_fc})
-    result = {}
-    for squad, days in snapshot.items():
-        result[squad] = {}
-        for dt, closers in days.items():
-            result[squad][dt] = dict(closers)
-    return result
-
-def enriquecer_snapshot(snapshot_data):
-    deals_atuais = buscar_deals_forecast()
-    deal_map = {d["id"]: d for d in deals_atuais}
-    result = {}
-    for squad, days in snapshot_data.items():
-        result[squad] = {}
-        for dt, closers in days.items():
-            day_totals = {"media_prevista": 0.0, "ganho": 0.0, "perdido": 0.0, "remanejado": 0.0, "closers": {}}
-            for closer, deals_list in closers.items():
-                c_totals = {"media_prevista": 0.0, "ganho": 0.0, "perdido": 0.0, "remanejado": 0.0, "deals": []}
-                for d in deals_list:
-                    prob  = d.get("probabilidade") or 0
-                    valor = d.get("valor", 0)
-                    media = valor * (prob / 100)
-                    c_totals["media_prevista"] += media
-                    day_totals["media_prevista"] += media
-                    atual = deal_map.get(d["id"])
-                    if not atual:
-                        status_atual = "ganho"
-                    else:
-                        status_atual = atual.get("status", "open")
-                        if status_atual == "won":
-                            status_atual = "ganho"
-                        elif status_atual == "lost":
-                            status_atual = "perdido"
-                        elif status_atual == "open":
-                            new_date = atual.get("expected_close_date", "")
-                            if new_date != d["expected_close_date_original"]:
-                                status_atual = "remanejado"
-                    key = status_atual if status_atual in ("ganho","perdido","remanejado") else "ganho"
-                    c_totals[key] += valor
-                    day_totals[key] += valor
-                    c_totals["deals"].append({**d, "status_atual": status_atual})
-                day_totals["closers"][closer] = c_totals
-            total_prev = day_totals["media_prevista"]
-            day_totals["pct_atingimento"] = arred(day_totals["ganho"]/total_prev*100) if total_prev else None
-            result[squad][dt] = day_totals
-    return result
-
-@app.route("/api/snapshot", methods=["POST"])
-def api_snapshot():
-    if "nome" not in session or not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
-    try:
-        hoje_str = (datetime.now()-timedelta(hours=3)).strftime("%Y-%m-%d")
-        path = f"snapshots/{hoje_str}.json"
-        existing, sha = github_get_file(path)
-        if existing: return jsonify({"existe": True, "data": hoje_str})
-        import json
-        data = calcular_snapshot()
-        github_put_file(path, json.dumps(data, ensure_ascii=False, indent=2), sha=None, message=f"snapshot {hoje_str}")
-        return jsonify({"ok": True, "data": hoje_str})
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-@app.route("/api/snapshot/sobrepor", methods=["POST"])
-def api_snapshot_sobrepor():
-    if "nome" not in session or not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
-    try:
-        hoje_str = (datetime.now()-timedelta(hours=3)).strftime("%Y-%m-%d")
-        path = f"snapshots/{hoje_str}.json"
-        _, sha = github_get_file(path)
-        import json
-        data = calcular_snapshot()
-        github_put_file(path, json.dumps(data, ensure_ascii=False, indent=2), sha=sha, message=f"snapshot {hoje_str} (sobreposto)")
-        return jsonify({"ok": True, "data": hoje_str})
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-@app.route("/api/historico")
-def api_historico():
-    if "nome" not in session or not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
-    try:
-        import json
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/snapshots"
-        resp = req.get(url, headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}, timeout=15)
-        if resp.status_code == 404: return jsonify({"snapshots": []})
-        resp.raise_for_status()
-        files = [f["name"].replace(".json","") for f in resp.json() if f["name"].endswith(".json")]
-        files.sort(reverse=True)
-        result = {}
-        for fname in files[:30]:
-            content_str, _ = github_get_file(f"snapshots/{fname}.json")
-            if content_str:
-                snap = json.loads(content_str)
-                result[fname] = enriquecer_snapshot(snap)
-        return jsonify(limpar_nans({"snapshots": result, "datas": files, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-
-# ── FORECAST DE REUNIÕES ──────────────────────────────────────
-
-def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
-    from collections import defaultdict
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-    hoje_str = hoje.strftime("%Y-%m-%d")
-
-    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
-    metas      = buscar_metas_todas(ano, mes)
-    users_pipe = buscar_users_pipe()
-    activities = buscar_activities_mes(mes, ano)
-    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
-
-    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
-    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
-
-    nome_to_subarea = {}
-    nome_to_head    = {}
-    nome_to_cargo   = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        hd  = str(row.get(head_col, "")).strip() if head_col else ""
-        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
-        nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = hd
-        nome_to_cargo[nn]   = cg
-
-    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
-    SQUADS_SEM_SDR_FR = {"latam", "orion"}
-
-    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
-    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
-
-    # Squads visíveis
-    if head_filter is None:
-        squads_visiveis = None
-    elif head_filter == "__none__":
-        squads_visiveis = set()
-    elif head_filter.startswith("__squad__:"):
-        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
-    else:
-        head_nn = norm(head_filter)
-        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
-                           if norm(nome_to_head.get(nn, "")) == head_nn and sub}
-
-    def visivel(sub):
-        return squads_visiveis is None or norm(sub) in squads_visiveis
-
-    # Identifica SDRs (meta_reu > 0) + team leaders de squads com SDR
-    sdrs_metas = [m for m in metas if m["meta_reu"] > 0 and m["meta_fin"] > 0]
-    sdr_uid_set = set()
-    sdr_info = {}  # uid -> {nome, subarea, is_lider}
-
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
-        uid = nome_norm_to_uid.get(nn)
-        if not uid: continue
-        sdr_uid_set.add(uid)
-        sdr_info[uid] = {"nome": m["nome"], "subarea": sub, "is_lider": False}
-
-    # Team leaders de squads com SDR também são SDR no forecast
-    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-    for uid, uname in users_pipe.items():
-        nn = norm(uname)
-        if nn not in team_leaders: continue
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
-        if norm(own_sub) in SQUADS_SEM_SDR_FR: continue
-        if uid in sdr_uid_set: continue
-        sdr_uid_set.add(uid)
-        sdr_info[uid] = {"nome": uname, "subarea": own_sub, "is_lider": True}
-
-    # Mapas de atividades por owner e criador
-    acts_by_owner   = defaultdict(list)
-    acts_by_creator = defaultdict(list)
-    for act in activities:
-        oid = act.get("owner_id")
-        cid = act.get("created_by_user_id")
-        if oid: acts_by_owner[oid].append(act)
-        if cid: acts_by_creator[cid].append(act)
-
-    def get_acts_sdr(uid, sub):
-        if norm(sub) in SQUADS_CRIADOR:
-            return acts_by_creator.get(uid, [])
-        return acts_by_owner.get(uid, [])
-
-    def act_realizada(act):
-        """Mesma regra do painel individual"""
-        if not (act.get("done") is True or act.get("status") == "done"): return False
-        deal_id   = act.get("deal_id")
-        act_owner = str(act.get("owner_id", ""))
-        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
-        if act_owner and deal_owner and act_owner == deal_owner: return False
-        if deal_id and deal_id not in deal_ids_validos: return False
-        return True
-
-    # Agrega por squad → dia → SDR
-    # Estrutura: by_squad[sub_display][dia][uid] = {prevista, ag_no_dia, ag_p_outros, realizada}
-    by_squad = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {
-        "prevista": 0, "ag_no_dia": 0, "ag_p_outros": 0, "realizada": 0
-    })))
-
-    for uid, info in sdr_info.items():
-        sub = info["subarea"]
-        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
-        acts = get_acts_sdr(uid, sub)
-
-        for act in acts:
-            due_date  = str(act.get("due_date", "") or "")[:10]
-            add_date  = str(act.get("add_time",  "") or "")[:10]
-            if not due_date: continue
-
-            d = by_squad[sub_display][due_date][uid]
-
-            # Prevista: qualquer activity com due_date = esse dia
-            d["prevista"] += 1
-
-            # Ag. no Dia: criada nesse mesmo dia E due_date = esse dia
-            if add_date == due_date:
-                d["ag_no_dia"] += 1
-
-            # Ag. p/ Outros: criada nesse dia MAS due_date é outro dia
-            # (conta no dia de criação, não no due_date)
-            # — tratado separado abaixo
-
-            # Realizada
-            if act_realizada(act):
-                d["realizada"] += 1
-
-    # "Ag. p/ Outros" = criada nesse dia MAS due_date é outro dia → conta no dia de criação
-    for uid, info in sdr_info.items():
-        sub = info["subarea"]
-        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
-        acts = get_acts_sdr(uid, sub)
-
-        for act in acts:
-            due_date = str(act.get("due_date", "") or "")[:10]
-            add_date = str(act.get("add_time",  "") or "")[:10]
-            if not add_date or not due_date: continue
-            if add_date == due_date: continue  # já contou em ag_no_dia
-            # Agendou nesse dia (add_date) para outro dia (due_date)
-            # Registra no dia de criação (add_date)
-            by_squad[sub_display][add_date][uid]["ag_p_outros"] += 1
-
-    # Monta resultado final
-    import calendar as cal_mod
-    ultimo_dia = cal_mod.monthrange(ano, mes)[1]
-    all_days = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
-
-    result = {}
-    for sub_display, days in by_squad.items():
-        rows = []
-        # Inclui todos os dias do mês que tenham dados
-        dias_com_dados = sorted(days.keys())
-        for dia in dias_com_dados:
-            sdrs_dia = days[dia]
-            # Agrega totais do dia
-            tot_prev = sum(v["prevista"] for v in sdrs_dia.values())
-            tot_agnd = sum(v["ag_no_dia"] for v in sdrs_dia.values())
-            tot_agot = sum(v["ag_p_outros"] for v in sdrs_dia.values())
-            tot_real = sum(v["realizada"] for v in sdrs_dia.values())
-            is_past  = dia < hoje_str
-
-            tot_noshow = (tot_prev - tot_real) if is_past else None
-            tot_gap    = tot_prev - tot_real
-            tot_pct    = arred(safe_div(tot_real, tot_prev) * 100) if tot_prev > 0 else None
-
-            # SDRs individuais
-            sdrs_list = []
-            for uid, vals in sdrs_dia.items():
-                info = sdr_info.get(uid, {})
-                nome_sdr = info.get("nome", uid_to_nome_norm.get(uid, str(uid)))
-                is_lider = info.get("is_lider", False)
-                p = vals["prevista"]
-                r = vals["realizada"]
-                ns = (p - r) if is_past else None
-                g  = p - r
-                pct = arred(safe_div(r, p) * 100) if p > 0 else None
-                sdrs_list.append({
-                    "uid": uid,
-                    "nome": nome_sdr,
-                    "is_lider": is_lider,
-                    "prevista":    p,
-                    "ag_no_dia":   vals["ag_no_dia"],
-                    "ag_p_outros": vals["ag_p_outros"],
-                    "realizada":   r,
-                    "no_show":     ns,
-                    "gap":         g,
-                    "pct":         pct,
-                })
-            sdrs_list.sort(key=lambda x: -x["prevista"])
-
-            rows.append({
-                "dia":         dia,
-                "prevista":    tot_prev,
-                "ag_no_dia":   tot_agnd,
-                "ag_p_outros": tot_agot,
-                "realizada":   tot_real,
-                "no_show":     tot_noshow,
-                "gap":         tot_gap,
-                "pct":         tot_pct,
-                "sdrs":        sdrs_list,
-            })
-
-        # Total do squad
-        t_prev = sum(r["prevista"] for r in rows)
-        t_real = sum(r["realizada"] for r in rows)
-        t_pct  = arred(safe_div(t_real, t_prev) * 100) if t_prev > 0 else None
-        result[sub_display] = {
-            "rows": rows,
-            "total": {
-                "prevista":    t_prev,
-                "ag_no_dia":   sum(r["ag_no_dia"] for r in rows),
-                "ag_p_outros": sum(r["ag_p_outros"] for r in rows),
-                "realizada":   t_real,
-                "gap":         t_prev - t_real,
-                "pct":         t_pct,
+        {
+          label: 'Realizado MTD',
+          data: realLine,
+          borderColor: '#F5C518',
+          borderWidth: 3,
+          pointRadius: dias.map((d,i) => {
+            if (i === todayIdx) return 8;
+            return labelDays.has(i) ? 5 : 2;
+          }),
+          pointBackgroundColor: pointColors,
+          pointBorderColor: '#1A1A2E',
+          pointBorderWidth: 2,
+          pointHoverRadius: 9,
+          pointHoverBackgroundColor: '#F5C518',
+          tension: 0.25,
+          fill: {
+            target: 0,
+            above: 'rgba(245,197,24,.06)',
+            below: 'rgba(185,28,28,.08)',
+          },
+          order: 1,
+          datalabels: {
+            display: (ctx) => labelDays.has(ctx.dataIndex),
+            color: (ctx) => {
+              const i = ctx.dataIndex;
+              return realLine[i] >= metaLine[i] ? '#F5C518' : '#EF4444';
+            },
+            font: { size: 9, weight: '700' },
+            anchor: 'end', align: 'bottom',
+            formatter: v => fmtBRL(v),
+          }
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            color: '#E5E7EB',
+            font: { size: 11, weight: '700' },
+            boxWidth: 20, boxHeight: 2,
+            padding: 18,
+            usePointStyle: true, pointStyle: 'line',
+          }
+        },
+        tooltip: {
+          backgroundColor: '#0D0D1A',
+          titleColor: '#F5C518',
+          bodyColor: '#E5E7EB',
+          footerColor: '#9CA3AF',
+          borderColor: '#F5C518',
+          borderWidth: 1,
+          padding: 14,
+          cornerRadius: 6,
+          callbacks: {
+            title: items => `Dia ${items[0].label}`,
+            label: ctx => `  ${ctx.dataset.label}:  ${fmtBRL(ctx.raw)}`,
+            footer: items => {
+              const meta = items.find(i => i.dataset.label === 'Meta MTD');
+              const real = items.find(i => i.dataset.label === 'Realizado MTD');
+              if (meta && real && meta.raw > 0) {
+                const gap = real.raw - meta.raw;
+                const pct = (real.raw / meta.raw * 100).toFixed(1);
+                const sinal = gap >= 0 ? '+' : '';
+                return `Gap: ${sinal}${fmtBRL(gap)}   •   ${pct}%`;
+              }
+              return '';
             }
+          }
+        },
+        // sem annotation plugin — marcamos hoje via pointRadius maior
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#9CA3AF',
+            font: { size: 10 },
+            maxRotation: 0,
+            autoSkip: false,
+            callback: (val, i) => {
+              if (i === todayIdx) return '◆';
+              const day = parseInt(labels[i]);
+              return day % 5 === 0 || day === 1 || i === lastIdx ? labels[i] : '';
+            }
+          },
+          grid: { color: 'rgba(255,255,255,.04)' },
+          border: { color: 'rgba(255,255,255,.1)' }
+        },
+        y: {
+          ticks: {
+            color: '#9CA3AF',
+            font: { size: 10 },
+            callback: v => fmtBRL(v),
+            maxTicksLimit: 6,
+          },
+          grid: { color: 'rgba(255,255,255,.05)' },
+          border: { color: 'rgba(255,255,255,.1)' }
         }
-
-    return {
-        "squads": result,
-        "mes": mes, "ano": ano,
-        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+      }
     }
+  });
+}
 
-@app.route("/api/forecast-reunioes")
-def api_forecast_reunioes():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        mes = request.args.get("mes", type=int)
-        ano = request.args.get("ano", type=int)
-        nome_sess = session.get("nome", "")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        if norm(nome_sess) in superusers:
-            head_filter = None
-        else:
-            colab_df = buscar_colaboradores()
-            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
-            if is_head:
-                head_filter = nome_sess
-            else:
-                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                lider_sub = None
-                if lider_col:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
-                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
-                            break
-                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
-        return jsonify(limpar_nans(calcular_forecast_reunioes(mes=mes, ano=ano, head_filter=head_filter)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+function renderOverview(data) {
+  const squads  = data.squads || {};
+  const total   = squads['__TOTAL__'];
+  const regular = Object.entries(squads).filter(([k]) => k !== '__TOTAL__').sort(([a],[b]) => a.localeCompare(b));
 
+  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;background:#0D0D1A;padding:24px;border-radius:12px;">';
 
-# ── OVERVIEW (JACARÉ) ─────────────────────────────────────────
+  regular.forEach(([squad, sq]) => {
+    const id = 'chart_' + squad.replace(/[^a-zA-Z0-9]/g,'_');
+    html += `
+    <div style="background:#111827;border:1px solid #2D2D3D;border-radius:10px;padding:20px;box-shadow:0 4px 12px rgba(0,0,0,.4)">
+      <div style="font-size:12px;font-weight:700;color:#F5C518;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px">${squad}</div>
+      <canvas id="${id}" height="160"></canvas>
+    </div>`;
+  });
 
-def calcular_overview(mes=None, ano=None):
-    from collections import defaultdict
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
+  html += '</div>';
 
-    feriados   = buscar_feriados()
-    du_total   = du_mes_total(ano, mes, feriados)
-    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
-    metas      = buscar_metas_todas(ano, mes)
-    deals      = buscar_deals_mes(mes, ano)
+  // Total
+  if (total) {
+    html += `
+    <div style="background:#111827;border:1px solid #F5C518;border-radius:10px;padding:24px;margin-bottom:16px;box-shadow:0 4px 20px rgba(245,197,24,.15)">
+      <div style="font-size:13px;font-weight:700;color:#F5C518;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px">▶ TOTAL CONSOLIDADO</div>
+      <canvas id="chart___TOTAL__" height="90"></canvas>
+    </div>`;
+  }
 
-    import calendar as cal_mod
-    ultimo_dia = cal_mod.monthrange(ano, mes)[1]
-    todos_dias = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
+  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
 
-    # Dias úteis acumulados por dia do mês
-    du_acum = {}
-    count = 0
-    for d in range(1, ultimo_dia + 1):
-        dt = date(ano, mes, d)
-        if dt.weekday() < 5 and dt not in feriados:
-            count += 1
-        du_acum[dt.strftime("%Y-%m-%d")] = count
+  document.getElementById('overview-content').innerHTML = html;
 
-    # Mapas do COLAB
-    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    nome_to_subarea = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        nome_to_subarea[nn] = sub
+  // Render charts after DOM update
+  setTimeout(() => {
+    regular.forEach(([squad, sq]) => {
+      const id = 'chart_' + squad.replace(/[^a-zA-Z0-9]/g,'_');
+      criarGrafico(id, squad, sq.dias, sq.meta_total);
+    });
+    if (total) criarGrafico('chart___TOTAL__', 'TOTAL', total.dias, total.meta_total);
+  }, 50);
+}
 
-    # Meta total por squad (só closers: meta_reu == 0)
-    meta_por_squad = defaultdict(float)
-    for m in metas:
-        if m["meta_reu"] == 0 and m["meta_fin"] > 0:
-            sub = nome_to_subarea.get(m["nome_norm"], "")
-            if not sub: continue
-            sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
-            meta_por_squad[sub_display] += m["meta_fin"]
+async function fetchOverview() {
+  document.getElementById('overview-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Carregando overview...</div></div>';
+  try {
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/overview?mes=${mes}&ano=${ano}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderOverview(data);
+  } catch(e) {
+    document.getElementById('overview-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
 
-    # Ganhos acumulados por dia por squad (bruto, sem multiplicador)
-    ganhos_dia = defaultdict(lambda: defaultdict(float))  # squad -> dia -> valor
-    for deal in deals:
-        wt = won_time_br(deal)[:10]
-        if not wt: continue
-        owner_nn = norm(get_owner_name(deal))
-        if not owner_nn:
-            from math import isnan
-            oid = get_owner_id(deal)
-            owner_nn = norm(next((n for u, n in buscar_users_pipe().items() if u == oid), ""))
-        sub = nome_to_subarea.get(owner_nn, "")
-        if not sub: continue
-        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
-        valor = float(deal.get("value") or 0)
-        ganhos_dia[sub_display][wt] += valor
-
-    # Monta séries por squad
-    result = {}
-    meta_total = 0.0
-    ganhos_total_dia = defaultdict(float)
-
-    all_squads = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
-
-    for squad in all_squads:
-        meta = meta_por_squad.get(squad, 0.0)
-        meta_total += meta
-        dias = []
-        real_acum = 0.0
-        for dia in todos_dias:
-            real_acum += ganhos_dia[squad].get(dia, 0.0)
-            ganhos_total_dia[dia] += ganhos_dia[squad].get(dia, 0.0)
-            du_ate_aqui = du_acum.get(dia, 0)
-            meta_mtd = arred(safe_div(meta, du_total) * du_ate_aqui) if du_total else 0
-            dias.append({
-                "dia":       dia,
-                "meta_mtd":  meta_mtd,
-                "real_mtd":  arred(real_acum),
-            })
-        result[squad] = {"dias": dias, "meta_total": arred(meta)}
-
-    # Total consolidado
-    total_acum = 0.0
-    total_dias = []
-    for dia in todos_dias:
-        total_acum += ganhos_total_dia.get(dia, 0.0)
-        du_ate_aqui = du_acum.get(dia, 0)
-        meta_mtd_t = arred(safe_div(meta_total, du_total) * du_ate_aqui) if du_total else 0
-        total_dias.append({
-            "dia":      dia,
-            "meta_mtd": meta_mtd_t,
-            "real_mtd": arred(total_acum),
-        })
-    result["__TOTAL__"] = {"dias": total_dias, "meta_total": arred(meta_total)}
-
-    return {
-        "squads": result,
-        "mes": mes, "ano": ano,
-        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
-    }
-
-@app.route("/api/overview")
-def api_overview():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    if not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
-    try:
-        mes = request.args.get("mes", type=int)
-        ano = request.args.get("ano", type=int)
-        return jsonify(limpar_nans(calcular_overview(mes=mes, ano=ano)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+// Init
+const hoje = new Date();
+if (IS_MASTER) {
+  document.getElementById('tab-historico').style.display = '';
+  document.getElementById('tab-overview').style.display = '';
+}
+document.getElementById('sel-mes').value = hoje.getMonth() + 1;
+fetchAbril();
+setInterval(fetchAbril, 5 * 60 * 1000);
+</script>
+</body>
+</html>
