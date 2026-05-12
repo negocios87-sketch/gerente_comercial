@@ -1089,46 +1089,66 @@ function criarGrafico(canvasId, squad, dias, metaTotal) {
 }
 
 function renderOverview(data) {
-  const squads  = data.squads || {};
-  const total   = squads['__TOTAL__'];
-  const regular = Object.entries(squads).filter(([k]) => k !== '__TOTAL__').sort(([a],[b]) => a.localeCompare(b));
+  const squads = data.squads || {};
+  const total  = squads['__TOTAL__'];
 
-  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
+  // Ordem definida pelo CEO
+  const ROW1 = ['Sniper','Elite','Olympus'];
+  const ROW2 = ['LATAM','Orion'];
 
-  regular.forEach(([squad, sq]) => {
+  function chartCard(squad, sq) {
     const id = 'chart_' + squad.replace(/[^a-zA-Z0-9]/g,'_');
-    html += `
-    <div style="background:#fff;border:1px solid #E2E4E9;border-radius:8px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.07)">
-      <div style="font-size:11px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:6px"><span style="width:3px;height:12px;background:#B8860B;border-radius:2px;display:inline-block"></span>${squad}</div>
+    return `<div style="background:#fff;border:1px solid #E2E4E9;border-radius:8px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.07)">
+      <div style="font-size:11px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+        <span style="width:3px;height:12px;background:#B8860B;border-radius:2px;display:inline-block"></span>${squad}
+      </div>
       <canvas id="${id}" height="160"></canvas>
     </div>`;
-  });
+  }
 
+  function findSquad(name) {
+    return Object.entries(squads).find(([k]) => k !== '__TOTAL__' &&
+      k.toLowerCase() === name.toLowerCase());
+  }
+
+  // Linha 1: 3 colunas
+  let html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">';
+  ROW1.forEach(name => {
+    const e = findSquad(name);
+    if (e) html += chartCard(e[0], e[1]);
+  });
+  html += '</div>';
+
+  // Linha 2: 2 colunas centralizadas
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;max-width:67%;margin-left:auto;margin-right:auto">';
+  ROW2.forEach(name => {
+    const e = findSquad(name);
+    if (e) html += chartCard(e[0], e[1]);
+  });
   html += '</div>';
 
   // Total
   if (total) {
     html += `
     <div style="background:#fff;border:1px solid #B8860B;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(184,134,11,.12)">
-      <div style="font-size:12px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;display:flex;align-items:center;gap:6px"><span style="width:3px;height:14px;background:#B8860B;border-radius:2px;display:inline-block"></span>Total Consolidado</div>
+      <div style="font-size:12px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;display:flex;align-items:center;gap:6px">
+        <span style="width:3px;height:14px;background:#B8860B;border-radius:2px;display:inline-block"></span>Total Consolidado
+      </div>
       <canvas id="chart___TOTAL__" height="90"></canvas>
     </div>`;
   }
 
   html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
-
   document.getElementById('overview-content').innerHTML = html;
 
-  // Render charts after DOM update
   setTimeout(() => {
-    regular.forEach(([squad, sq]) => {
-      const id = 'chart_' + squad.replace(/[^a-zA-Z0-9]/g,'_');
-      criarGrafico(id, squad, sq.dias, sq.meta_total);
+    [...ROW1, ...ROW2].forEach(name => {
+      const e = findSquad(name);
+      if (e) criarGrafico('chart_' + e[0].replace(/[^a-zA-Z0-9]/g,'_'), e[0], e[1].dias, e[1].meta_total);
     });
     if (total) criarGrafico('chart___TOTAL__', 'TOTAL', total.dias, total.meta_total);
   }, 50);
 }
-
 async function fetchOverview() {
   document.getElementById('overview-content').innerHTML =
     '<div class="card"><div class="loading"><div class="spinner"></div>Carregando overview...</div></div>';
