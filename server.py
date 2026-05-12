@@ -1311,6 +1311,124 @@ def api_forecast_reunioes():
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
 
+
+# ── OVERVIEW (JACARÉ) ─────────────────────────────────────────
+
+def calcular_overview(mes=None, ano=None):
+    from collections import defaultdict
+    hoje = date.today()
+    mes  = mes or hoje.month
+    ano  = ano or hoje.year
+
+    feriados   = buscar_feriados()
+    du_total   = du_mes_total(ano, mes, feriados)
+    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
+    metas      = buscar_metas_todas(ano, mes)
+    deals      = buscar_deals_mes(mes, ano)
+
+    import calendar as cal_mod
+    ultimo_dia = cal_mod.monthrange(ano, mes)[1]
+    todos_dias = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
+
+    # Dias úteis acumulados por dia do mês
+    du_acum = {}
+    count = 0
+    for d in range(1, ultimo_dia + 1):
+        dt = date(ano, mes, d)
+        if dt.weekday() < 5 and dt not in feriados:
+            count += 1
+        du_acum[dt.strftime("%Y-%m-%d")] = count
+
+    # Mapas do COLAB
+    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    nome_to_subarea = {}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        nome_to_subarea[nn] = sub
+
+    # Meta total por squad (só closers: meta_reu == 0)
+    meta_por_squad = defaultdict(float)
+    for m in metas:
+        if m["meta_reu"] == 0 and m["meta_fin"] > 0:
+            sub = nome_to_subarea.get(m["nome_norm"], "")
+            if not sub: continue
+            sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
+            meta_por_squad[sub_display] += m["meta_fin"]
+
+    # Ganhos acumulados por dia por squad (bruto, sem multiplicador)
+    ganhos_dia = defaultdict(lambda: defaultdict(float))  # squad -> dia -> valor
+    for deal in deals:
+        wt = won_time_br(deal)[:10]
+        if not wt: continue
+        owner_nn = norm(get_owner_name(deal))
+        if not owner_nn:
+            from math import isnan
+            oid = get_owner_id(deal)
+            owner_nn = norm(next((n for u, n in buscar_users_pipe().items() if u == oid), ""))
+        sub = nome_to_subarea.get(owner_nn, "")
+        if not sub: continue
+        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
+        valor = float(deal.get("value") or 0)
+        ganhos_dia[sub_display][wt] += valor
+
+    # Monta séries por squad
+    result = {}
+    meta_total = 0.0
+    ganhos_total_dia = defaultdict(float)
+
+    all_squads = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
+
+    for squad in all_squads:
+        meta = meta_por_squad.get(squad, 0.0)
+        meta_total += meta
+        dias = []
+        real_acum = 0.0
+        for dia in todos_dias:
+            real_acum += ganhos_dia[squad].get(dia, 0.0)
+            ganhos_total_dia[dia] += ganhos_dia[squad].get(dia, 0.0)
+            du_ate_aqui = du_acum.get(dia, 0)
+            meta_mtd = arred(safe_div(meta, du_total) * du_ate_aqui) if du_total else 0
+            dias.append({
+                "dia":       dia,
+                "meta_mtd":  meta_mtd,
+                "real_mtd":  arred(real_acum),
+            })
+        result[squad] = {"dias": dias, "meta_total": arred(meta)}
+
+    # Total consolidado
+    total_acum = 0.0
+    total_dias = []
+    for dia in todos_dias:
+        total_acum += ganhos_total_dia.get(dia, 0.0)
+        du_ate_aqui = du_acum.get(dia, 0)
+        meta_mtd_t = arred(safe_div(meta_total, du_total) * du_ate_aqui) if du_total else 0
+        total_dias.append({
+            "dia":      dia,
+            "meta_mtd": meta_mtd_t,
+            "real_mtd": arred(total_acum),
+        })
+    result["__TOTAL__"] = {"dias": total_dias, "meta_total": arred(meta_total)}
+
+    return {
+        "squads": result,
+        "mes": mes, "ano": ano,
+        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/api/overview")
+def api_overview():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    if not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
+    try:
+        mes = request.args.get("mes", type=int)
+        ano = request.args.get("ano", type=int)
+        return jsonify(limpar_nans(calcular_overview(mes=mes, ano=ano)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
