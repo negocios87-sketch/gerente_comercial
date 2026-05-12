@@ -138,6 +138,7 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .error-state { padding: 40px; text-align: center; color: var(--red); }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -177,6 +178,7 @@
   <div class="tab" onclick="setTab('forecast')">Forecast Diário</div>
   <div class="tab" id="tab-historico" style="display:none" onclick="setTab('historico')">Histórico</div>
   <div class="tab" onclick="setTab('forecast-reunioes')">Forecast de Reuniões</div>
+  <div class="tab" id="tab-overview" style="display:none" onclick="setTab('overview')">Overview</div>
 </div>
 
 <div class="main">
@@ -200,6 +202,11 @@
       <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast de reuniões...</div></div>
     </div>
   </div>
+  <div class="panel" id="panel-overview">
+    <div id="overview-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Carregando overview...</div></div>
+    </div>
+  </div>
 
 </div>
 
@@ -216,13 +223,14 @@ function exportarGanhos() {
 }
 
 function setTab(tab) {
-  const tabs   = ['abril','forecast','historico','forecast-reunioes'];
-  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes'];
+  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview'];
+  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
   if (tab === 'forecast') fetchForecast();
   if (tab === 'historico') fetchHistorico();
   if (tab === 'forecast-reunioes') fetchForecastReunioes();
+  if (tab === 'overview') fetchOverview();
 }
 
 // ── FORMAT ────────────────────────────────────────────────────
@@ -934,10 +942,144 @@ async function fetchForecastReunioes() {
   }
 }
 
+
+// ── OVERVIEW (JACARÉ) ─────────────────────────────────────────
+const OV_CHARTS = {};
+
+function destroyChart(id) {
+  if (OV_CHARTS[id]) { OV_CHARTS[id].destroy(); delete OV_CHARTS[id]; }
+}
+
+function criarGrafico(canvasId, squad, dias, metaTotal) {
+  destroyChart(canvasId);
+  const labels   = dias.map(d => d.dia.slice(5));  // MM-DD
+  const metaLine = dias.map(d => d.meta_mtd);
+  const realLine = dias.map(d => d.real_mtd);
+  const hoje     = new Date().toISOString().slice(5,10);
+  const todayIdx = labels.indexOf(hoje);
+
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  OV_CHARTS[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Meta MTD',
+          data: metaLine,
+          borderColor: '#B8860B',
+          backgroundColor: 'rgba(184,134,11,.08)',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0,
+          fill: false,
+        },
+        {
+          label: 'Realizado MTD',
+          data: realLine,
+          borderColor: '#0D7A3E',
+          backgroundColor: 'rgba(13,122,62,.08)',
+          borderWidth: 2.5,
+          pointRadius: 0,
+          tension: 0,
+          fill: false,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 14 } },
+        title: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: R$ ${Number(ctx.raw).toLocaleString('pt-BR', {maximumFractionDigits:0})}`,
+          }
+        },
+        annotation: todayIdx >= 0 ? {
+          annotations: {
+            hoje: { type: 'line', xMin: todayIdx, xMax: todayIdx, borderColor: '#B91C1C', borderWidth: 1, borderDash: [4,4], label: { content: 'Hoje', display: true, font: { size: 9 } } }
+          }
+        } : {}
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, font: { size: 10 } }, grid: { color: 'rgba(0,0,0,.04)' } },
+        y: {
+          ticks: {
+            font: { size: 10 },
+            callback: v => 'R$ ' + (v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'k' : v)
+          },
+          grid: { color: 'rgba(0,0,0,.04)' }
+        }
+      }
+    }
+  });
+}
+
+function renderOverview(data) {
+  const squads  = data.squads || {};
+  const total   = squads['__TOTAL__'];
+  const regular = Object.entries(squads).filter(([k]) => k !== '__TOTAL__').sort(([a],[b]) => a.localeCompare(b));
+
+  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">';
+
+  regular.forEach(([squad, sq]) => {
+    const id = 'chart_' + squad.replace(/[^a-zA-Z0-9]/g,'_');
+    html += `
+    <div class="card" style="padding:16px">
+      <div style="font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">${squad}</div>
+      <canvas id="${id}" height="160"></canvas>
+    </div>`;
+  });
+
+  html += '</div>';
+
+  // Total
+  if (total) {
+    html += `
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">▶ TOTAL CONSOLIDADO</div>
+      <canvas id="chart___TOTAL__" height="120"></canvas>
+    </div>`;
+  }
+
+  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
+
+  document.getElementById('overview-content').innerHTML = html;
+
+  // Render charts after DOM update
+  setTimeout(() => {
+    regular.forEach(([squad, sq]) => {
+      const id = 'chart_' + squad.replace(/[^a-zA-Z0-9]/g,'_');
+      criarGrafico(id, squad, sq.dias, sq.meta_total);
+    });
+    if (total) criarGrafico('chart___TOTAL__', 'TOTAL', total.dias, total.meta_total);
+  }, 50);
+}
+
+async function fetchOverview() {
+  document.getElementById('overview-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Carregando overview...</div></div>';
+  try {
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/overview?mes=${mes}&ano=${ano}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderOverview(data);
+  } catch(e) {
+    document.getElementById('overview-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
 // Init
 const hoje = new Date();
 if (IS_MASTER) {
   document.getElementById('tab-historico').style.display = '';
+  document.getElementById('tab-overview').style.display = '';
 }
 document.getElementById('sel-mes').value = hoje.getMonth() + 1;
 fetchAbril();
