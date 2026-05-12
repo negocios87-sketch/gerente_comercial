@@ -950,16 +950,29 @@ function destroyChart(id) {
   if (OV_CHARTS[id]) { OV_CHARTS[id].destroy(); delete OV_CHARTS[id]; }
 }
 
+function fmtBRL(v) {
+  if (v == null) return '—';
+  if (v >= 1000000) return 'R$ ' + (v/1000000).toFixed(2).replace('.',',') + 'M';
+  if (v >= 1000)    return 'R$ ' + (v/1000).toFixed(1).replace('.',',') + 'k';
+  return 'R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
+}
+
 function criarGrafico(canvasId, squad, dias, metaTotal) {
   destroyChart(canvasId);
-  const labels   = dias.map(d => d.dia.slice(5));  // MM-DD
-  const metaLine = dias.map(d => d.meta_mtd);
-  const realLine = dias.map(d => d.real_mtd);
-  const hoje     = new Date().toISOString().slice(5,10);
-  const todayIdx = labels.indexOf(hoje);
+  const todayFull = new Date().toISOString().slice(0,10);
+  const labels    = dias.map(d => d.dia.slice(8));  // só o dia: "01","02",...
+  const metaLine  = dias.map(d => d.meta_mtd);
+  const realLine  = dias.map(d => d.real_mtd);
+  const todayIdx  = dias.findIndex(d => d.dia === todayFull);
 
-  const ctx = document.getElementById(canvasId).getContext('2d');
-  OV_CHARTS[canvasId] = new Chart(ctx, {
+  // Cores dinâmicas por ponto: verde se real >= meta, vermelho se abaixo
+  const pointColors = realLine.map((v, i) => v >= metaLine[i] ? '#0D7A3E' : '#B91C1C');
+  const pointBorder = realLine.map((v, i) => v >= metaLine[i] ? '#0D7A3E' : '#B91C1C');
+
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  OV_CHARTS[canvasId] = new Chart(ctx.getContext('2d'), {
     type: 'line',
     data: {
       labels,
@@ -968,49 +981,98 @@ function criarGrafico(canvasId, squad, dias, metaTotal) {
           label: 'Meta MTD',
           data: metaLine,
           borderColor: '#B8860B',
-          backgroundColor: 'rgba(184,134,11,.08)',
           borderWidth: 2,
-          pointRadius: 0,
-          tension: 0,
+          borderDash: [6, 3],
+          pointRadius: 3,
+          pointBackgroundColor: '#B8860B',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 1.5,
+          pointHoverRadius: 6,
+          pointHoverBackgroundColor: '#B8860B',
+          tension: 0.3,
           fill: false,
+          order: 2,
         },
         {
           label: 'Realizado MTD',
           data: realLine,
-          borderColor: '#0D7A3E',
-          backgroundColor: 'rgba(13,122,62,.08)',
+          borderColor: '#1A1A2E',
           borderWidth: 2.5,
-          pointRadius: 0,
-          tension: 0,
-          fill: false,
+          pointRadius: pointColors.map((c, i) => i === todayIdx ? 7 : 4),
+          pointBackgroundColor: pointColors,
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          pointHoverRadius: 8,
+          pointHoverBackgroundColor: pointColors,
+          tension: 0.3,
+          fill: {
+            target: 0,
+            above: 'rgba(13,122,62,.07)',
+            below: 'rgba(185,28,28,.07)',
+          },
+          order: 1,
         },
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 14 } },
-        title: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => `${ctx.dataset.label}: R$ ${Number(ctx.raw).toLocaleString('pt-BR', {maximumFractionDigits:0})}`,
+        legend: {
+          position: 'top',
+          labels: {
+            font: { size: 11, weight: '600' },
+            boxWidth: 16, boxHeight: 3,
+            padding: 16,
+            usePointStyle: true, pointStyle: 'line',
           }
         },
-        annotation: todayIdx >= 0 ? {
-          annotations: {
-            hoje: { type: 'line', xMin: todayIdx, xMax: todayIdx, borderColor: '#B91C1C', borderWidth: 1, borderDash: [4,4], label: { content: 'Hoje', display: true, font: { size: 9 } } }
+        tooltip: {
+          backgroundColor: '#1A1A2E',
+          titleColor: '#B8860B',
+          bodyColor: '#fff',
+          borderColor: '#B8860B',
+          borderWidth: 1,
+          padding: 12,
+          callbacks: {
+            title: items => `Dia ${items[0].label}`,
+            label: ctx => ` ${ctx.dataset.label}: ${fmtBRL(ctx.raw)}`,
+            afterBody: items => {
+              const meta = items.find(i => i.dataset.label === 'Meta MTD');
+              const real = items.find(i => i.dataset.label === 'Realizado MTD');
+              if (meta && real) {
+                const gap = real.raw - meta.raw;
+                const pct = meta.raw > 0 ? (real.raw / meta.raw * 100).toFixed(1) : '—';
+                return [``, ` Gap: ${gap >= 0 ? '+' : ''}${fmtBRL(gap)}   Ating.: ${pct}%`];
+              }
+              return [];
+            }
           }
-        } : {}
+        },
       },
       scales: {
-        x: { ticks: { maxTicksLimit: 10, font: { size: 10 } }, grid: { color: 'rgba(0,0,0,.04)' } },
+        x: {
+          ticks: {
+            font: { size: 10 },
+            maxRotation: 0,
+            autoSkip: false,
+            callback: (val, i) => {
+              // Mostra só múltiplos de 5 + hoje pra não poluir
+              const day = parseInt(labels[i]);
+              if (i === todayIdx) return '📍';
+              return day % 5 === 0 || day === 1 ? labels[i] : '';
+            }
+          },
+          grid: { color: 'rgba(0,0,0,.04)' }
+        },
         y: {
           ticks: {
             font: { size: 10 },
-            callback: v => 'R$ ' + (v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'k' : v)
+            callback: v => fmtBRL(v),
+            maxTicksLimit: 6,
           },
-          grid: { color: 'rgba(0,0,0,.04)' }
+          grid: { color: 'rgba(0,0,0,.05)' }
         }
       }
     }
@@ -1040,7 +1102,7 @@ function renderOverview(data) {
     html += `
     <div class="card" style="padding:16px;margin-bottom:16px">
       <div style="font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">▶ TOTAL CONSOLIDADO</div>
-      <canvas id="chart___TOTAL__" height="120"></canvas>
+      <canvas id="chart___TOTAL__" height="100"></canvas>
     </div>`;
   }
 
