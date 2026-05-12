@@ -1339,12 +1339,13 @@ def calcular_overview(mes=None, ano=None):
             count += 1
         du_acum[dt.strftime("%Y-%m-%d")] = count
 
-    # Meta por squad vem direto do calcular_abril (já correta e provada)
+    # Meta por squad — calcular_abril aplica /10 na meta do Sheets
+    # mas os deals do Pipedrive estão na escala original (x10), então corrigimos aqui
     meta_por_squad = {}
     for sq in abril_data.get("squads", []):
         tc = sq.get("closer_total")
         if tc and tc.get("meta", 0) > 0:
-            meta_por_squad[sq["nome"]] = tc["meta"]
+            meta_por_squad[sq["nome"]] = tc["meta"] * 10
 
     # Realizado por dia por squad — só closers (meta_reu == 0)
     colab_df  = buscar_colaboradores(mes=mes, ano=ano)
