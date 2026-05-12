@@ -784,7 +784,8 @@ function renderHistorico(data) {
         <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
         <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(media)}</td>
         <td class="col-fc" style="color:var(--green);font-weight:600">${R(realizada)}</td>
-        <td class="col-fc">—</td>
+        <td class="col-fc" style="color:var(--amber);font-weight:600">${row.gap_25 != null ? N(row.gap_25) : '—'}</td>
+        <td class="col-fc" style="color:var(--amber)">${row.pct_25 != null ? pctBadgeFc(row.pct_25) : '—'}</td>
         <td class="col-fc">${pctAting != null ? pctBadgeFc(pctAting) : '—'}</td>
       </tr>`;
 
@@ -957,6 +958,7 @@ function renderForecastReunioes(data) {
           <td class="col-fc" style="font-size:11px">${sNs}</td>
           <td class="col-fc" style="font-size:11px">${sGap}</td>
           <td class="col-fc" style="font-size:11px;color:var(--amber);font-weight:600">${s.gap_25 != null ? N(s.gap_25) : '—'}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--amber)">${s.pct_25 != null ? pctBadgeFc(s.pct_25) : '—'}</td>
           <td class="col-fc" style="font-size:11px">${s.pct != null ? pctBadgeFc(s.pct) : '—'}</td>
         </tr>`;
       });
@@ -973,6 +975,7 @@ function renderForecastReunioes(data) {
       <td>—</td>
       <td>${tGap}</td>
       <td style="color:var(--amber);font-weight:700">${tot.gap_25 != null ? N(tot.gap_25) : '—'}</td>
+      <td style="color:var(--amber);font-weight:700">${tot.pct_25 != null ? pctBadgeFc(tot.pct_25) : '—'}</td>
       <td>${tot.pct!=null?pctBadgeFc(tot.pct):'—'}</td>
     </tr>`;
 
@@ -994,6 +997,7 @@ function renderForecastReunioes(data) {
               <th style="color:#FCA5A5">No Show</th>
               <th>Gap</th>
               <th style="color:var(--amber)">GAP 25</th>
+              <th style="color:var(--amber)">% GAP 25</th>
               <th>% Ating.</th>
             </tr></thead>
             <tbody>${tbody}</tbody>
