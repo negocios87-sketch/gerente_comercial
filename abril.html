@@ -957,8 +957,8 @@ function renderForecastReunioes(data) {
           <td class="col-fc" style="font-size:11px;color:var(--green)">${N(s.realizada)}</td>
           <td class="col-fc" style="font-size:11px">${sNs}</td>
           <td class="col-fc" style="font-size:11px">${sGap}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--amber);font-weight:600">${s.gap_25 != null ? N(s.gap_25) : '—'}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--amber)">${s.pct_25 != null ? pctBadgeFc(s.pct_25) : '—'}</td>
+          <td class="col-fc" style="font-size:11px;color:var(--text-muted)">—</td>
+          <td class="col-fc" style="font-size:11px;color:var(--text-muted)">—</td>
           <td class="col-fc" style="font-size:11px">${s.pct != null ? pctBadgeFc(s.pct) : '—'}</td>
         </tr>`;
       });
