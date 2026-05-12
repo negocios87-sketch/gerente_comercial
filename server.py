@@ -1332,15 +1332,13 @@ def calcular_overview(mes=None, ano=None):
     mes  = mes or hoje.month
     ano  = ano or hoje.year
 
-    # Reutiliza calcular_abril que já tem a lógica correta de metas e realizado
     abril_data = calcular_abril(mes=mes, ano=ano, head_filter=None)
 
-    feriados  = buscar_feriados()
-    du_total  = du_mes_total(ano, mes, feriados)
+    feriados   = buscar_feriados()
+    du_total   = du_mes_total(ano, mes, feriados)
     ultimo_dia = cal_mod.monthrange(ano, mes)[1]
     todos_dias = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
 
-    # Dias úteis acumulados por dia do mês
     du_acum = {}
     count = 0
     for d in range(1, ultimo_dia + 1):
@@ -1349,20 +1347,15 @@ def calcular_overview(mes=None, ano=None):
             count += 1
         du_acum[dt.strftime("%Y-%m-%d")] = count
 
-    # Meta por squad — calcular_abril aplica /10 na meta do Sheets
-    # mas os deals do Pipedrive estão na escala original (x10), então corrigimos aqui
-    # Mapa inverso: display_name -> raw_name (ex: "Olympus" -> "MGM")
-    DISPLAY_TO_RAW = {v: k for k, v in SQUAD_DISPLAY.items()}
-
-    meta_por_squad = {}  # chave = raw name (ex: "MGM")
+    # Meta por squad — usa nome de exibição como chave (ex: "Olympus")
+    meta_por_squad = {}
     for sq in abril_data.get("squads", []):
         tc = sq.get("closer_total")
         if tc and tc.get("meta", 0) > 0:
-            nome = sq["nome"]  # pode ser "Olympus" (display) ou "MGM" (raw)
-            raw_nome = DISPLAY_TO_RAW.get(nome, nome)  # converte para raw
-            meta_por_squad[raw_nome] = tc["meta"]
+            # sq["nome"] já tem o display name aplicado pelo calcular_abril
+            meta_por_squad[sq["nome"]] = tc["meta"]
 
-    # Realizado por dia por squad — só closers (meta_reu == 0)
+    # Realizado por dia — usa display_squad para garantir mesma chave da meta
     colab_df  = buscar_colaboradores(mes=mes, ano=ano)
     sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
     nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
@@ -1385,26 +1378,28 @@ def calcular_overview(mes=None, ano=None):
             oid = get_owner_id(deal)
             owner_nn = uid_to_norm_ov.get(oid, "")
         if not owner_nn: continue
-        # Qualquer pessoa do COLAB conta — heads, líderes e closers com meta
         sub = nome_to_subarea.get(owner_nn, "")
         if not sub: continue
-        sub_raw = "Licenciados" if sub.upper().startswith("LIC") else sub
-        ganhos_dia[sub_raw][wt] += float(deal.get("value") or 0)
+        # Aplica display_squad para garantir mesma chave que meta_por_squad
+        if sub.upper().startswith("LIC"):
+            sub_key = "Licenciados"
+        else:
+            sub_key = display_squad(sub)
+        ganhos_dia[sub_key][wt] += float(deal.get("value") or 0)
 
-    # Monta séries por squad (exclui Zenite e Licenciados)
+    # Monta séries
     result       = {}
     meta_total   = 0.0
     ganhos_total = defaultdict(float)
-    all_squads   = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
-
-    META_CAP_TOTAL = 3_000_000  # CEO pediu cap de 3MM no gráfico total
+    # Squads para o total (usando display names)
+    SQUADS_TOTAL_DISPLAY = {display_squad(s) for s in SQUADS_TOTAL_OVERVIEW} | SQUADS_TOTAL_OVERVIEW
+    all_squads = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
 
     for squad in all_squads:
-        if norm(squad) in SQUADS_EXCLUIR_OVERVIEW:
+        if norm(squad) in SQUADS_EXCLUIR_OVERVIEW or squad.lower() in SQUADS_EXCLUIR_OVERVIEW:
             continue
         meta = meta_por_squad.get(squad, 0.0)
-        # Inclui no total apenas os 5 squads principais
-        if norm(squad) in SQUADS_TOTAL_OVERVIEW:
+        if norm(squad) in SQUADS_TOTAL_OVERVIEW or squad in SQUADS_TOTAL_DISPLAY:
             meta_total += meta
             for dia in todos_dias:
                 ganhos_total[dia] += ganhos_dia[squad].get(dia, 0.0)
@@ -1415,19 +1410,17 @@ def calcular_overview(mes=None, ano=None):
             du_ate   = du_acum.get(dia, 0)
             meta_mtd = arred(safe_div(meta, du_total) * du_ate) if du_total else 0
             dias.append({"dia": dia, "meta_mtd": meta_mtd, "real_mtd": arred(real_acum)})
-        # Usa nome de exibição como chave (ex: MGM -> Olympus)
-        result[display_squad(squad)] = {"dias": dias, "meta_total": arred(meta)}
+        result[squad] = {"dias": dias, "meta_total": arred(meta)}
 
-    # Total consolidado — meta capped em 3MM, realizado dos 5 squads principais
+    META_CAP_TOTAL = 3_000_000
     total_acum = 0.0
     total_dias = []
     for dia in todos_dias:
         total_acum += ganhos_total.get(dia, 0.0)
         du_ate = du_acum.get(dia, 0)
-        meta_mtd_total = min(arred(safe_div(META_CAP_TOTAL, du_total) * du_ate), META_CAP_TOTAL) if du_total else 0
         total_dias.append({
             "dia":      dia,
-            "meta_mtd": meta_mtd_total,
+            "meta_mtd": min(arred(safe_div(META_CAP_TOTAL, du_total) * du_ate), META_CAP_TOTAL) if du_total else 0,
             "real_mtd": arred(total_acum),
         })
     result["__TOTAL__"] = {"dias": total_dias, "meta_total": META_CAP_TOTAL}
