@@ -42,9 +42,9 @@ def display_squad(nome):
     return SQUAD_DISPLAY.get(nome, SQUAD_DISPLAY.get(nome.strip(), nome))
 
 # Squads excluídos do Overview (Jacaré)
-SQUADS_EXCLUIR_OVERVIEW = {"zenite", "licenciados"}
+SQUADS_EXCLUIR_OVERVIEW = {"licenciados"}
 # Squads incluídos no total do Overview
-SQUADS_TOTAL_OVERVIEW   = {"sniper", "elite", "mgm", "latam", "orion"}
+SQUADS_TOTAL_OVERVIEW   = {"sniper", "elite", "mgm", "latam", "orion", "zenite"}
 
 # ── HELPERS ───────────────────────────────────────────────────
 def norm(s):
@@ -240,6 +240,34 @@ def buscar_deals_mes(mes, ano):
         start += 500
     return todos
 
+
+def buscar_referidos_mes(mes, ano):
+    """Conta referidos por owner (todos os status, filtro por mês de criação)"""
+    from collections import defaultdict
+    todos, start = [], 0
+    mes_str = f"{ano}-{mes:02d}"
+    while True:
+        resp = req.get(f"{BASE_V1}/deals", params={
+            "filter_id": FILTER_REFERIDOS,
+            "status": "all_not_deleted",
+            "limit": 500, "start": start,
+            "api_token": API_KEY,
+        }, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        lote = data.get("data") or []
+        for deal in lote:
+            if str(deal.get("add_time", ""))[:7] == mes_str:
+                todos.append(deal)
+        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
+        if not mais or not lote: break
+        start += 500
+    contagem = defaultdict(int)
+    for deal in todos:
+        nn = norm(get_owner_name(deal))
+        if nn: contagem[nn] += 1
+    return contagem
+
 def buscar_activities_mes(mes, ano):
     todos, cursor = [], None
     mes_str = f"{ano}-{mes:02d}"
@@ -316,6 +344,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     qual_ids   = buscar_qual_ids()
     deals      = buscar_deals_mes(mes, ano)
     activities = buscar_activities_mes(mes, ano)
+    referidos  = buscar_referidos_mes(mes, ano)
 
     sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
     nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
@@ -413,7 +442,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
     sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
 
-    def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False):
+    def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False, refs=0):
         mtd = safe_div(meta, du_total) * du_pass if du_total else 0
         return {
             "nome": nome, "meta": arred(meta), "is_head": is_head,
@@ -430,6 +459,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "meta_dia_multi": arred(safe_div(meta - real_multi, du_rest)) if du_rest else 0,
             "qtd_ganhos": qtd,
             "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
+            "referidos": refs,
         }
 
     lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
@@ -454,7 +484,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if not sub or not visivel(sub): continue
         ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
         get_squad(sub)["closers_ind"].append(
-            build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"])
+            build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"], refs=referidos.get(nn, 0))
         )
 
     for uid, uname in users_pipe.items():
@@ -470,7 +500,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if nn in existing: continue
         ri = closer_real[nn]
         get_squad(own_sub)["closers_ind"].append(
-            build_closer_row(uname, 0, ri["valor"], ri["valor_multi"], ri["qtd"], is_head=True)
+            build_closer_row(uname, 0, ri["valor"], ri["valor_multi"], ri["qtd"], is_head=True, refs=referidos.get(nn, 0))
         )
 
     # SDRs — usa criador da atividade para squads em SQUADS_CRIADOR
@@ -560,7 +590,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         t_real = sum(c["realizado"] for c in ind)
         t_multi= sum(c["realizado_multi"] for c in ind)
         t_qtd  = sum(c["qtd_ganhos"] for c in ind)
-        return build_closer_row("TOTAL", t_meta, t_real, t_multi, t_qtd)
+        t_refs = sum(c.get("referidos", 0) for c in ind)
+        return build_closer_row("TOTAL", t_meta, t_real, t_multi, t_qtd, refs=t_refs)
 
     def total_sdrs(ind):
         if not ind: return None
@@ -624,6 +655,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "closer_bruto":   arred(tc["realizado"]) if tc else 0,
             "closer_multi":   arred(tc["realizado_multi"]) if tc else 0,
             "closer_vol":     tc["qtd_ganhos"] if tc else 0,
+            "closer_refs":    tc.get("referidos", 0) if tc else 0,
             "sdr_meta_reu":  arred(ts["meta_reuniao"]) if ts else 0,
             "sdr_meta_fin":  arred(ts["meta_ganho"]) if ts else 0,
             "sdr_bruto":     arred(ts["valor_ganho"]) if ts else 0,
@@ -659,6 +691,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "closer_bruto":  arred(sum(sq.get("closer_bruto", 0) for sq in denise_squads)),
             "closer_multi":  arred(sum(sq.get("closer_multi", 0) for sq in denise_squads)),
             "closer_vol":    sum(sq.get("closer_vol", 0) for sq in denise_squads),
+            "closer_refs":   sum(sq.get("closer_refs", 0) for sq in denise_squads),
             "sdr_meta_reu":  sum(sq.get("sdr_meta_reu", 0) for sq in denise_squads),
             "sdr_meta_fin":  arred(sum(sq.get("sdr_meta_fin", 0) for sq in denise_squads)),
             "sdr_bruto":     arred(sum(sq.get("sdr_bruto", 0) for sq in denise_squads)),
@@ -689,6 +722,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "closer_bruto":  arred(sum(r.get("closer_bruto",0) for r in squads_para_geral)),
             "closer_multi":  arred(sum(r.get("closer_multi",0) for r in squads_para_geral)),
             "closer_vol":    sum(r.get("closer_vol",0) for r in squads_para_geral),
+            "closer_refs":   sum(r.get("closer_refs",0) for r in squads_para_geral),
             "sdr_meta_reu":  sum(r.get("sdr_meta_reu",0) for r in squads_para_geral),
             "sdr_meta_fin":  arred(sum(r.get("sdr_meta_fin",0) for r in squads_para_geral)),
             "sdr_bruto":     arred(sum(r.get("sdr_bruto",0) for r in squads_para_geral)),
@@ -1434,7 +1468,7 @@ def api_forecast_reunioes():
 
 # ── OVERVIEW (JACARÉ) ─────────────────────────────────────────
 
-def calcular_overview(mes=None, ano=None):
+def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
     from collections import defaultdict
     import calendar as cal_mod
 
@@ -1522,6 +1556,37 @@ def calcular_overview(mes=None, ano=None):
             dias.append({"dia": dia, "meta_mtd": meta_mtd, "real_mtd": arred(real_acum)})
         result[squad] = {"dias": dias, "meta_total": arred(meta)}
 
+    # Consolidado Denise (Sniper + Elite + Olympus)
+    DENISE_OV = ["Sniper", "Elite", "Olympus"]
+    if is_denise:
+        denise_squads_data = {k: v for k, v in result.items() if k in DENISE_OV}
+        if denise_squads_data:
+            meta_denise = sum(v["meta_total"] for v in denise_squads_data.values())
+            denise_dias = []
+            for j, dia in enumerate(todos_dias):
+                real_d = sum(v["dias"][j]["real_mtd"] - (v["dias"][j-1]["real_mtd"] if j>0 else 0)
+                             for v in denise_squads_data.values())
+                pass
+            # Reconstrói série acumulada da Denise
+            denise_acum = 0.0
+            denise_ganhos_dia = defaultdict(float)
+            for sq_key in DENISE_OV:
+                sq_data = result.get(sq_key, {})
+                prev = 0.0
+                for row in sq_data.get("dias", []):
+                    delta = row["real_mtd"] - prev
+                    denise_ganhos_dia[row["dia"]] += delta
+                    prev = row["real_mtd"]
+            denise_dias_list = []
+            denise_acum = 0.0
+            count_d = 0
+            for dia in todos_dias:
+                denise_acum += denise_ganhos_dia.get(dia, 0.0)
+                count_d = du_acum.get(dia, 0)
+                meta_mtd_d = arred(safe_div(meta_denise, du_total) * count_d) if du_total else 0
+                denise_dias_list.append({"dia": dia, "meta_mtd": meta_mtd_d, "real_mtd": arred(denise_acum)})
+            result["__DENISE__"] = {"dias": denise_dias_list, "meta_total": arred(meta_denise)}
+
     META_CAP_TOTAL = 3_000_000
     total_acum = 0.0
     total_dias = []
@@ -1543,11 +1608,36 @@ def calcular_overview(mes=None, ano=None):
 @app.route("/api/overview")
 def api_overview():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    if not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
     try:
         mes = request.args.get("mes", type=int)
         ano = request.args.get("ano", type=int)
-        return jsonify(limpar_nans(calcular_overview(mes=mes, ano=ano)))
+        nome_sess = session.get("nome", "")
+        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
+
+        if norm(nome_sess) in superusers:
+            head_filter = None
+        else:
+            colab_df = buscar_colaboradores()
+            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
+            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
+            if is_head:
+                head_filter = nome_sess
+            else:
+                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+                lider_sub = None
+                if lider_col:
+                    for _, row in colab_df.iterrows():
+                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
+                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
+                            break
+                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+
+        # Verifica se é a Denise (head de Sniper+Elite+Olympus) para mostrar consolidado
+        DENISE_HEADS = {"denise mussolin"}
+        is_denise = norm(nome_sess) in DENISE_HEADS
+        return jsonify(limpar_nans(calcular_overview(mes=mes, ano=ano, head_filter=head_filter, is_denise=is_denise)))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
