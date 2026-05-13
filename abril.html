@@ -314,7 +314,7 @@ function closerHeaders() {
         <th class="col-com" style="display:none">% c/Multi</th>
         <th class="col-com" style="display:none">Déf. 100%</th>
         <th class="col-com" style="display:none">Meta/Dia</th>
-        <th>Vol.</th><th>Ticket</th>
+        <th>Vol.</th><th>Ticket</th><th style="color:#7C3AED">Referidos</th>
       </tr>
     </thead>`;
 }
@@ -342,6 +342,7 @@ function closerRow(r, gid, isMember) {
     <td class="col-com" style="display:none">${hasMeta ? R(r.meta_dia_multi) : '—'}</td>
     <td>${N(r.qtd_ganhos)}</td>
     <td>${R(r.ticket_medio)}</td>
+    <td style="color:#7C3AED;font-weight:600">${r.referidos > 0 ? N(r.referidos) : '—'}</td>
   </tr>`;
 }
 
@@ -362,7 +363,7 @@ function renderClosers(closers, total, squadIdx) {
     <td class="col-com" style="display:none">${pctBadge(total.pct_atingido_multi)}</td>
     <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
     <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
-    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td>
+    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td><td style="color:#7C3AED;font-weight:700">${total.referidos > 0 ? N(total.referidos) : '—'}</td>
   </tr>` : '';
   // Group header row (collapsible)
   const groupRow = total ? `<tr class="row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')">
@@ -375,7 +376,7 @@ function renderClosers(closers, total, squadIdx) {
     <td class="col-com" style="display:none">${pctBadge(total.pct_atingido_multi)}</td>
     <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
     <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
-    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td>
+    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td><td style="color:#7C3AED;font-weight:700">${total.referidos > 0 ? N(total.referidos) : '—'}</td>
   </tr>` : '';
   return `<div class="section">
     <div class="card"><div class="table-scroll"><table>${closerHeaders()}<tbody>
@@ -448,6 +449,7 @@ function renderResultados(resultados) {
       <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.closer_bruto)}</span></div>
       <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.closer_multi)}</span></div>
       <div class="rc-row"><span class="rc-label">Vol. Ganhos</span><span class="rc-val">${N(r.closer_vol)}</span></div>
+      ${r.closer_refs > 0 ? `<div class="rc-row"><span class="rc-label" style="color:#7C3AED">Referidos</span><span class="rc-val" style="color:#7C3AED">${N(r.closer_refs)}</span></div>` : ''}
       ${r.tem_sdr ? `
       <div class="rc-section-label" style="margin-top:8px">SDR's</div>
       <div class="rc-row"><span class="rc-label">Meta Reunião</span><span class="rc-val">${N(r.sdr_meta_reu)}</span></div>
@@ -1183,46 +1185,72 @@ function criarGrafico(canvasId, squad, dias, metaTotal) {
 }
 
 function renderOverview(data) {
-  const squads = data.squads || {};
-  const total  = squads['__TOTAL__'];
+  const squads   = data.squads || {};
+  const total    = squads['__TOTAL__'];
+  const denise   = squads['__DENISE__'];
+  const isMaster = data.is_master;
+  const isDenise = data.is_denise;
 
-  // Ordem definida pelo CEO
   const ROW1 = ['Sniper','Elite','Olympus'];
-  const ROW2 = ['LATAM','Orion'];
+  const ROW2 = ['LATAM','Orion','Zenite'];
 
-  function chartCard(squad, sq) {
+  function findSquad(name) {
+    return Object.entries(squads).find(([k]) =>
+      k !== '__TOTAL__' && k !== '__DENISE__' &&
+      k.toLowerCase() === name.toLowerCase());
+  }
+
+  function chartCard(squad, sq, height=160) {
     const id = 'chart_' + squad.replace(/[^a-zA-Z0-9]/g,'_');
     return `<div style="background:#fff;border:1px solid #E2E4E9;border-radius:8px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.07)">
       <div style="font-size:11px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:6px">
         <span style="width:3px;height:12px;background:#B8860B;border-radius:2px;display:inline-block"></span>${squad}
       </div>
-      <canvas id="${id}" height="160"></canvas>
+      <canvas id="${id}" height="${height}"></canvas>
     </div>`;
   }
 
-  function findSquad(name) {
-    return Object.entries(squads).find(([k]) => k !== '__TOTAL__' &&
-      k.toLowerCase() === name.toLowerCase());
+  // Check which rows have data
+  const row1entries = ROW1.map(n => findSquad(n)).filter(Boolean);
+  const row2entries = ROW2.map(n => findSquad(n)).filter(Boolean);
+  const allRegular  = [...row1entries, ...row2entries];
+
+  let html = '';
+
+  if (allRegular.length > 0) {
+    // Row 1: up to 3 cols
+    if (row1entries.length > 0) {
+      html += `<div style="display:grid;grid-template-columns:repeat(${row1entries.length},1fr);gap:16px;margin-bottom:16px">`;
+      row1entries.forEach(([sq, data]) => html += chartCard(sq, data));
+      html += '</div>';
+    }
+    // Row 2: up to 3 cols
+    if (row2entries.length > 0) {
+      html += `<div style="display:grid;grid-template-columns:repeat(${row2entries.length},1fr);gap:16px;margin-bottom:20px">`;
+      row2entries.forEach(([sq, data]) => html += chartCard(sq, data));
+      html += '</div>';
+    }
+  } else {
+    // Single squad view (líder)
+    const singleEntries = Object.entries(squads).filter(([k]) => k !== '__TOTAL__' && k !== '__DENISE__');
+    html += `<div style="display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:20px">`;
+    singleEntries.forEach(([sq, data]) => html += chartCard(sq, data, 200));
+    html += '</div>';
   }
 
-  // Linha 1: 3 colunas
-  let html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">';
-  ROW1.forEach(name => {
-    const e = findSquad(name);
-    if (e) html += chartCard(e[0], e[1]);
-  });
-  html += '</div>';
+  // Denise consolidated chart (only for Denise)
+  if (isDenise && denise) {
+    html += `
+    <div style="background:#fff;border:1px solid #B8860B;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(184,134,11,.12)">
+      <div style="font-size:12px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;display:flex;align-items:center;gap:6px">
+        <span style="width:3px;height:14px;background:#B8860B;border-radius:2px;display:inline-block"></span>Consolidado — Sniper + Elite + Olympus
+      </div>
+      <canvas id="chart___DENISE__" height="90"></canvas>
+    </div>`;
+  }
 
-  // Linha 2: 2 colunas centralizadas
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;max-width:67%;margin-left:auto;margin-right:auto">';
-  ROW2.forEach(name => {
-    const e = findSquad(name);
-    if (e) html += chartCard(e[0], e[1]);
-  });
-  html += '</div>';
-
-  // Total
-  if (total) {
+  // Total 3MM (only for masters/superusers, not Denise)
+  if (isMaster && !isDenise && total) {
     html += `
     <div style="background:#fff;border:1px solid #B8860B;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(184,134,11,.12)">
       <div style="font-size:12px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;display:flex;align-items:center;gap:6px">
@@ -1236,11 +1264,17 @@ function renderOverview(data) {
   document.getElementById('overview-content').innerHTML = html;
 
   setTimeout(() => {
-    [...ROW1, ...ROW2].forEach(name => {
-      const e = findSquad(name);
-      if (e) criarGrafico('chart_' + e[0].replace(/[^a-zA-Z0-9]/g,'_'), e[0], e[1].dias, e[1].meta_total);
+    [...row1entries, ...row2entries].forEach(([sq, sqData]) => {
+      criarGrafico('chart_' + sq.replace(/[^a-zA-Z0-9]/g,'_'), sq, sqData.dias, sqData.meta_total);
     });
-    if (total) criarGrafico('chart___TOTAL__', 'TOTAL', total.dias, total.meta_total);
+    // Single squad fallback
+    if (allRegular.length === 0) {
+      Object.entries(squads).filter(([k]) => k !== '__TOTAL__' && k !== '__DENISE__').forEach(([sq, sqData]) => {
+        criarGrafico('chart_' + sq.replace(/[^a-zA-Z0-9]/g,'_'), sq, sqData.dias, sqData.meta_total);
+      });
+    }
+    if (isDenise && denise) criarGrafico('chart___DENISE__', 'Consolidado Denise', denise.dias, denise.meta_total);
+    if (isMaster && !isDenise && total) criarGrafico('chart___TOTAL__', 'Total', total.dias, total.meta_total);
   }, 50);
 }
 async function fetchOverview() {
@@ -1264,8 +1298,9 @@ async function fetchOverview() {
 const hoje = new Date();
 if (IS_MASTER) {
   document.getElementById('tab-historico').style.display = '';
-  document.getElementById('tab-overview').style.display = '';
 }
+// Overview disponível para todos
+document.getElementById('tab-overview').style.display = '';
 document.getElementById('sel-mes').value = hoje.getMonth() + 1;
 fetchAbril();
 setInterval(fetchAbril, 5 * 60 * 1000);
