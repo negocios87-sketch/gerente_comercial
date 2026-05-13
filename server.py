@@ -1603,6 +1603,8 @@ def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
 
     return {
         "squads": result,
+        "is_denise": is_denise,
+        "is_master": head_filter is None,
         "mes": mes, "ano": ano,
         "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
     }
