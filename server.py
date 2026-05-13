@@ -851,7 +851,8 @@ def exportar_ganhos():
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
 
 # ── FORECAST DIÁRIO ───────────────────────────────────────────
-FILTER_FORECAST = int(os.environ.get("FILTER_FORECAST", "1490240"))
+FILTER_FORECAST  = int(os.environ.get("FILTER_FORECAST",  "1490240"))
+FILTER_REFERIDOS = int(os.environ.get("FILTER_REFERIDOS", "1562285"))
 
 def buscar_deals_forecast():
     todos, cursor = [], None
