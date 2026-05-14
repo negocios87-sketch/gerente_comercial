@@ -420,14 +420,10 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     def act_valida(act, sub=""):
         if not (act.get("done") is True or act.get("status") == "done"): return False
-        deal_id = act.get("deal_id")
-        # Zenite usa criador; demais usam owner
-        if norm(sub) in SQUADS_CRIADOR:
-            act_user = str(act.get("created_by_user_id", ""))
-        else:
-            act_user = str(act.get("owner_id", ""))
+        deal_id   = act.get("deal_id")
+        act_owner = str(act.get("owner_id", ""))
         deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
-        if act_user and deal_owner and act_user == deal_owner:
+        if act_owner and deal_owner and act_owner == deal_owner:
             return False
         if deal_id and deal_id not in deal_ids_validos:
             return False
@@ -517,11 +513,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         uid      = nome_norm_to_uid.get(nn)
         uid_str  = str(uid) if uid else ""
 
-        # Zenite: usa created_by_user_id; demais: owner_id
-        if norm(sub) in SQUADS_CRIADOR:
-            acts_sdr = acts_by_creator.get(uid_str, [])
-        else:
-            acts_sdr = acts_by_owner.get(uid_str, [])
+        acts_sdr = acts_by_owner.get(uid_str, [])
 
         validadas     = [a for a in acts_sdr if act_valida(a, sub)]
         qtd_val       = len(validadas)
@@ -562,10 +554,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if norm(own_sub) in SQUADS_SEM_SDR: continue
         uid_str = str(uid)
 
-        if norm(own_sub) in SQUADS_CRIADOR:
-            acts_sdr = acts_by_creator.get(uid_str, [])
-        else:
-            acts_sdr = acts_by_owner.get(uid_str, [])
+        acts_sdr = acts_by_owner.get(uid_str, [])
 
         validadas   = [a for a in acts_sdr if act_valida(a, own_sub)]
         qtd_val     = len(validadas)
