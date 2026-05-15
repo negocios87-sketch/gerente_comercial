@@ -1225,8 +1225,6 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
         if cid: acts_by_creator[cid].append(act)
 
     def get_acts_sdr(uid, sub):
-        if norm(sub) in SQUADS_CRIADOR:
-            return acts_by_creator.get(uid, [])
         return acts_by_owner.get(uid, [])
 
     def act_realizada(act):
