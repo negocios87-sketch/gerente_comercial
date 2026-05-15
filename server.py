@@ -1638,6 +1638,138 @@ def api_overview():
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
 
+
+# ── RANKING ───────────────────────────────────────────────────
+
+def calcular_ranking(mes=None, ano=None):
+    hoje = date.today()
+    mes  = mes or hoje.month
+    ano  = ano or hoje.year
+
+    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
+    metas      = buscar_metas_todas(ano, mes)
+    users_pipe = buscar_users_pipe()
+    qual_ids   = buscar_qual_ids()
+    deals      = buscar_deals_mes(mes, ano)
+    activities = buscar_activities_mes(mes, ano)
+    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
+
+    feriados = buscar_feriados()
+    du_calc  = du_mes_total(ano, mes, feriados)
+    du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
+    du_total = du_sheet if du_sheet > 0 else du_calc
+
+    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    nome_to_subarea  = {}
+    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
+    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        nome_to_subarea[nn] = sub
+
+    if (ano > 2026) or (ano == 2026 and mes >= 5):
+        PESO_REU = 0.70; PESO_FIN = 0.30
+    else:
+        PESO_REU = 0.50; PESO_FIN = 0.50
+
+    # Realizado por closer
+    closer_real = {}
+    for deal in deals:
+        owner_nn = norm(get_owner_name(deal))
+        if not owner_nn:
+            oid = get_owner_id(deal)
+            owner_nn = uid_to_nome_norm.get(oid, "")
+        if not owner_nn: continue
+        valor = float(deal.get("value") or 0)
+        valor_multi = float(cf(deal, CF_MULTIPLICADOR) or 0)
+        if owner_nn not in closer_real:
+            closer_real[owner_nn] = {"valor": 0, "valor_multi": 0, "qtd": 0}
+        closer_real[owner_nn]["valor"]       += valor
+        closer_real[owner_nn]["valor_multi"] += valor_multi
+        closer_real[owner_nn]["qtd"]         += 1
+
+    acts_by_owner = {}
+    for act in activities:
+        oid = str(act.get("owner_id", ""))
+        acts_by_owner.setdefault(oid, []).append(act)
+
+    def act_valida(act):
+        if not (act.get("done") is True or act.get("status") == "done"): return False
+        deal_id   = act.get("deal_id")
+        act_owner = str(act.get("owner_id", ""))
+        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
+        if act_owner and deal_owner and act_owner == deal_owner: return False
+        if deal_id and deal_id not in deal_ids_validos: return False
+        return True
+
+    closers_list = []
+    sdrs_list    = []
+
+    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
+    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
+
+    for m in closers_metas:
+        nn  = m["nome_norm"]
+        sub = nome_to_subarea.get(nn, "")
+        if not sub: continue
+        sub_display = display_squad(sub)
+        ri = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
+        meta = m["meta_fin"]
+        real = ri["valor"]
+        pct  = arred(safe_div(real, meta) * 100) if meta else 0
+        closers_list.append({
+            "nome": m["nome"], "time": sub_display,
+            "meta": arred(meta), "realizado": arred(real),
+            "pct_atingido": pct,
+        })
+
+    for m in sdrs_metas:
+        nn  = m["nome_norm"]
+        sub = nome_to_subarea.get(nn, "")
+        if not sub: continue
+        sub_display = display_squad(sub)
+        meta_reu = m["meta_reu"] / 10
+        meta_fin = m["meta_fin"]
+        uid      = nome_norm_to_uid.get(nn)
+        uid_str  = str(uid) if uid else ""
+        acts_sdr = acts_by_owner.get(uid_str, [])
+        validadas   = len([a for a in acts_sdr if act_valida(a)])
+        qual_id     = qual_ids.get(nn)
+        deals_sdr   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
+        valor_ganho = sum(float(d.get("value") or 0) for d in deals_sdr)
+        pct_reu = arred(safe_div(validadas, meta_reu) * 100) if meta_reu else 0
+        pct_fin = arred(safe_div(valor_ganho, meta_fin) * 100) if meta_fin else 0
+        pct_final = arred(pct_reu * PESO_REU + pct_fin * PESO_FIN)
+        sdrs_list.append({
+            "nome": m["nome"], "time": sub_display,
+            "meta_reu": arred(meta_reu), "realizado_reu": validadas,
+            "meta_fin": arred(meta_fin), "realizado_fin": arred(valor_ganho),
+            "pct_reu": pct_reu, "pct_fin": pct_fin, "pct_final": pct_final,
+        })
+
+    times = sorted(set([c["time"] for c in closers_list] + [s["time"] for s in sdrs_list]))
+
+    return {
+        "closers": closers_list,
+        "sdrs":    sdrs_list,
+        "times":   times,
+        "mes": mes, "ano": ano,
+        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/api/ranking")
+def api_ranking():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        mes = request.args.get("mes", type=int)
+        ano = request.args.get("ano", type=int)
+        return jsonify(limpar_nans(calcular_ranking(mes=mes, ano=ano)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
