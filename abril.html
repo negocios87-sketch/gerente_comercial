@@ -185,6 +185,7 @@
   <div class="tab" id="tab-historico" style="display:none" onclick="setTab('historico')">Histórico</div>
   <div class="tab" onclick="setTab('forecast-reunioes')">Forecast de Reuniões</div>
   <div class="tab" id="tab-overview" style="display:none" onclick="setTab('overview')">Overview</div>
+  <div class="tab" onclick="setTab('ranking')">Ranking</div>
 </div>
 
 <div class="main">
@@ -213,6 +214,11 @@
       <div class="card"><div class="loading"><div class="spinner"></div>Carregando overview...</div></div>
     </div>
   </div>
+  <div class="panel" id="panel-ranking">
+    <div id="ranking-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Carregando ranking...</div></div>
+    </div>
+  </div>
 
 </div>
 
@@ -229,14 +235,15 @@ function exportarGanhos() {
 }
 
 function setTab(tab) {
-  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview'];
-  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview'];
+  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview','ranking'];
+  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview','panel-ranking'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
   if (tab === 'forecast') fetchForecast();
   if (tab === 'historico') fetchHistorico();
   if (tab === 'forecast-reunioes') fetchForecastReunioes();
   if (tab === 'overview') fetchOverview();
+  if (tab === 'ranking') fetchRanking();
 }
 
 // ── FORMAT ────────────────────────────────────────────────────
@@ -1290,6 +1297,181 @@ async function fetchOverview() {
     renderOverview(data);
   } catch(e) {
     document.getElementById('overview-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+
+// ── RANKING ───────────────────────────────────────────────────
+let rankingData = null;
+let rankTimesAtivos = [];
+let rankOrdemCloser = 'realizado';
+let rankOrdemSdr    = 'pct_final';
+
+function renderRanking(data) {
+  rankingData = data;
+  const times = data.times || [];
+  if (!rankTimesAtivos.length) rankTimesAtivos = [...times];
+
+  // Filtros de time
+  const btnTimes = times.map(t => `
+    <button onclick="toggleRankTime('${t}')"
+      id="rbtn_${t.replace(/[^a-zA-Z0-9]/g,'_')}"
+      style="padding:4px 12px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;border:1px solid var(--border);
+             background:${rankTimesAtivos.includes(t)?'var(--navy)':'var(--bg)'};
+             color:${rankTimesAtivos.includes(t)?'var(--gold)':'var(--text-muted)'};
+             transition:all .15s">${t}</button>`).join('');
+
+  const btnCloser = [
+    {k:'realizado', l:'Valor Financeiro'},
+    {k:'pct_atingido', l:'% Atingimento'},
+  ].map(b => `
+    <button onclick="setRankOrdem('closer','${b.k}')"
+      style="padding:4px 12px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;border:1px solid var(--border);
+             background:${rankOrdemCloser===b.k?'var(--gold)':'var(--bg)'};
+             color:${rankOrdemCloser===b.k?'var(--navy)':'var(--text-muted)'};
+             transition:all .15s">${b.l}</button>`).join('');
+
+  const btnSdr = [
+    {k:'realizado_fin', l:'Valor Financeiro'},
+    {k:'realizado_reu', l:'Reuniões'},
+    {k:'pct_final',     l:'% Meta Final'},
+  ].map(b => `
+    <button onclick="setRankOrdem('sdr','${b.k}')"
+      style="padding:4px 12px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;border:1px solid var(--border);
+             background:${rankOrdemSdr===b.k?'var(--gold)':'var(--bg)'};
+             color:${rankOrdemSdr===b.k?'var(--navy)':'var(--text-muted)'};
+             transition:all .15s">${b.l}</button>`).join('');
+
+  const closers = (data.closers || [])
+    .filter(c => rankTimesAtivos.includes(c.time))
+    .sort((a,b) => b[rankOrdemCloser] - a[rankOrdemCloser]);
+
+  const sdrs = (data.sdrs || [])
+    .filter(s => rankTimesAtivos.includes(s.time))
+    .sort((a,b) => b[rankOrdemSdr] - a[rankOrdemSdr]);
+
+  const closerRows = closers.map((c, i) => `
+    <tr>
+      <td style="padding-left:16px;font-weight:700;color:${i===0?'#B8860B':i===1?'#6B7280':i===2?'#92400E':'var(--text-muted)'};font-size:13px">${i+1}º</td>
+      <td><div class="name-cell">${avatarHtml(c.nome)}<span>${c.nome}</span></div></td>
+      <td style="color:var(--text-muted);font-size:11px">${c.time}</td>
+      <td>${R(c.meta)}</td>
+      <td class="val-real">${R(c.realizado)}</td>
+      <td>${pctBadge(c.pct_atingido)}</td>
+    </tr>`).join('');
+
+  const sdrRows = sdrs.map((s, i) => `
+    <tr>
+      <td style="padding-left:16px;font-weight:700;color:${i===0?'#B8860B':i===1?'#6B7280':i===2?'#92400E':'var(--text-muted)'};font-size:13px">${i+1}º</td>
+      <td><div class="name-cell">${avatarHtml(s.nome)}<span>${s.nome}</span></div></td>
+      <td style="color:var(--text-muted);font-size:11px">${s.time}</td>
+      <td>${N(s.meta_reu)}</td>
+      <td style="color:var(--green);font-weight:600">${N(s.realizado_reu)}</td>
+      <td>${R(s.meta_fin)}</td>
+      <td class="val-real">${R(s.realizado_fin)}</td>
+      <td>${pctBadge(s.pct_final)}</td>
+    </tr>`).join('');
+
+  const html = `
+    <!-- Filtros -->
+    <div class="card" style="padding:14px 18px;margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <span style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-right:4px">Times:</span>
+        ${btnTimes}
+        <button onclick="toggleRankAll()" style="padding:4px 12px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;border:1px solid var(--gold);background:transparent;color:var(--gold)">Todos / Nenhum</button>
+      </div>
+    </div>
+
+    <!-- Closers -->
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">Ranking — Closers</div>
+        <div style="display:flex;gap:6px">${btnCloser}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;width:40px">#</th>
+              <th style="text-align:left">Nome</th>
+              <th style="text-align:left">Time</th>
+              <th>Meta</th><th>Realizado</th><th>% Ating.</th>
+            </tr></thead>
+            <tbody>${closerRows || '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted)">Nenhum resultado</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- SDRs -->
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">Ranking — SDR's</div>
+        <div style="display:flex;gap:6px">${btnSdr}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;width:40px">#</th>
+              <th style="text-align:left">Nome</th>
+              <th style="text-align:left">Time</th>
+              <th>Meta Reu.</th><th>Real. Reu.</th>
+              <th>Meta Fin.</th><th>Real. Fin.</th>
+              <th>% Final</th>
+            </tr></thead>
+            <tbody>${sdrRows || '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Nenhum resultado</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:right;color:var(--text-muted);font-size:11px;margin-top:8px;font-style:italic">Atualizado: ${data.atualizado_em}</div>
+  `;
+
+  document.getElementById('ranking-content').innerHTML = html;
+}
+
+function toggleRankTime(t) {
+  if (rankTimesAtivos.includes(t)) {
+    rankTimesAtivos = rankTimesAtivos.filter(x => x !== t);
+  } else {
+    rankTimesAtivos.push(t);
+  }
+  if (rankingData) renderRanking(rankingData);
+}
+
+function toggleRankAll() {
+  if (rankTimesAtivos.length === (rankingData?.times||[]).length) {
+    rankTimesAtivos = [];
+  } else {
+    rankTimesAtivos = [...(rankingData?.times||[])];
+  }
+  if (rankingData) renderRanking(rankingData);
+}
+
+function setRankOrdem(tipo, campo) {
+  if (tipo === 'closer') rankOrdemCloser = campo;
+  else rankOrdemSdr = campo;
+  if (rankingData) renderRanking(rankingData);
+}
+
+async function fetchRanking() {
+  document.getElementById('ranking-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Carregando ranking...</div></div>';
+  try {
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/ranking?mes=${mes}&ano=${ano}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    rankTimesAtivos = [...(data.times||[])];
+    renderRanking(data);
+  } catch(e) {
+    document.getElementById('ranking-content').innerHTML =
       `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
   }
 }
