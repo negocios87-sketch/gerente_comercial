@@ -349,6 +349,7 @@ function closerRow(r, gid, isMember) {
     <td class="col-com" style="display:none">${hasMeta ? R(r.meta_dia_multi) : '—'}</td>
     <td>${N(r.qtd_ganhos)}</td>
     <td>${R(r.ticket_medio)}</td>
+    <td style="color:#0D7A3E;font-weight:600">${r.reunioes_closer > 0 ? N(r.reunioes_closer) : '—'}</td>
     <td style="color:#7C3AED;font-weight:600">${r.referidos > 0 ? N(r.referidos) : '—'}</td>
   </tr>`;
 }
@@ -370,7 +371,7 @@ function renderClosers(closers, total, squadIdx) {
     <td class="col-com" style="display:none">${pctBadge(total.pct_atingido_multi)}</td>
     <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
     <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
-    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td><td style="color:#7C3AED;font-weight:700">${total.referidos > 0 ? N(total.referidos) : '—'}</td>
+    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td><td style="color:#0D7A3E;font-weight:700">${total.reunioes_closer > 0 ? N(total.reunioes_closer) : '—'}</td><td style="color:#7C3AED;font-weight:700">${total.referidos > 0 ? N(total.referidos) : '—'}</td>
   </tr>` : '';
   // Group header row (collapsible)
   const groupRow = total ? `<tr class="row-group" data-gid="${gid}" onclick="toggleGroup('${gid}')">
@@ -383,7 +384,7 @@ function renderClosers(closers, total, squadIdx) {
     <td class="col-com" style="display:none">${pctBadge(total.pct_atingido_multi)}</td>
     <td class="col-com" style="display:none">${defVal(total.deficit_meta_multi)}</td>
     <td class="col-com" style="display:none">${R(total.meta_dia_multi)}</td>
-    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td><td style="color:#7C3AED;font-weight:700">${total.referidos > 0 ? N(total.referidos) : '—'}</td>
+    <td>${N(total.qtd_ganhos)}</td><td>${R(total.ticket_medio)}</td><td style="color:#0D7A3E;font-weight:700">${total.reunioes_closer > 0 ? N(total.reunioes_closer) : '—'}</td><td style="color:#7C3AED;font-weight:700">${total.referidos > 0 ? N(total.referidos) : '—'}</td>
   </tr>` : '';
   return `<div class="section">
     <div class="card"><div class="table-scroll"><table>${closerHeaders()}<tbody>
