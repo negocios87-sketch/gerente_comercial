@@ -34,7 +34,9 @@ URL_USERS    = os.environ.get("URL_USERS",    "https://docs.google.com/spreadshe
 URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1010928978&single=true&output=csv")
 
 # Squads que usam criador da atividade em vez do responsável
-SQUADS_CRIADOR = {"zenite"}
+SQUADS_CRIADOR   = {"zenite"}
+EXCLUIR_REU_CLOSER = {"matheus paz"}  # responsavel ignorado nas reunioes de closer
+SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
 
 # Mapeamento de nomes de exibição (cosmético)
 SQUAD_DISPLAY = {"MGM": "Olympus", "mgm": "Olympus"}
@@ -411,12 +413,45 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     # Agrupa atividades por owner_id E por created_by_user_id (para Zenite)
     acts_by_owner   = {}
     acts_by_creator = {}
+    # Mapa uid -> nome_norm para verificar Matheus Paz e closers
+    uid_to_nome_norm_all = {str(uid): norm(name) for uid, name in users_pipe.items()}
+    matheus_paz_uids = {str(uid) for uid, name in users_pipe.items() if norm(name) in EXCLUIR_REU_CLOSER}
+
     for act in activities:
         oid = str(act.get("owner_id", ""))
         acts_by_owner.setdefault(oid, []).append(act)
         cid = str(act.get("created_by_user_id", ""))
         if cid:
             acts_by_creator.setdefault(cid, []).append(act)
+
+    # Reunioes por closer: atividades cujo DEAL pertence ao closer
+    # Agrupa por deal_owner_uid -> lista de atividades
+    acts_by_deal_owner = {}
+    for act in activities:
+        if not (act.get("done") is True or act.get("status") == "done"): continue
+        deal_id = act.get("deal_id")
+        if not deal_id: continue
+        deal_own = str(mapa_deal_owner.get(deal_id, ""))
+        if not deal_own: continue
+        acts_by_deal_owner.setdefault(deal_own, []).append(act)
+
+    def contar_reu_closer(closer_uid_str, sub):
+        """Conta reunioes realizadas para o closer (deal owner = closer)"""
+        acts = acts_by_deal_owner.get(closer_uid_str, [])
+        tem_sdr = norm(sub) in SQUADS_COM_SDR
+        count = 0
+        for act in acts:
+            act_owner_uid = str(act.get("owner_id", ""))
+            # Exclui Matheus Paz como responsavel
+            if act_owner_uid in matheus_paz_uids: continue
+            if tem_sdr:
+                # Com SDR: responsavel NAO pode ser o proprio closer
+                if act_owner_uid == closer_uid_str: continue
+            else:
+                # Sem SDR: responsavel TEM que ser o proprio closer
+                if act_owner_uid != closer_uid_str: continue
+            count += 1
+        return count
 
     def act_valida(act, sub=""):
         if not (act.get("done") is True or act.get("status") == "done"): return False
@@ -442,7 +477,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
     sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
 
-    def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False, refs=0):
+    def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False, refs=0, reu=0):
         mtd = safe_div(meta, du_total) * du_pass if du_total else 0
         return {
             "nome": nome, "meta": arred(meta), "is_head": is_head,
@@ -460,6 +495,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "qtd_ganhos": qtd,
             "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
             "referidos": refs,
+            "reunioes_closer": reu,
         }
 
     lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
@@ -483,8 +519,11 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         sub = nome_to_subarea.get(nn, "")
         if not sub or not visivel(sub): continue
         ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
+        uid_c = nome_norm_to_uid.get(nn)
+        uid_c_str = str(uid_c) if uid_c else ""
+        reu_c = contar_reu_closer(uid_c_str, sub)
         get_squad(sub)["closers_ind"].append(
-            build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"], refs=referidos.get(nn, 0))
+            build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"], refs=referidos.get(nn, 0), reu=reu_c)
         )
 
     for uid, uname in users_pipe.items():
@@ -499,8 +538,10 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         existing = [norm(c["nome"]) for c in squads.get(own_sub, {}).get("closers_ind", [])]
         if nn in existing: continue
         ri = closer_real[nn]
+        uid_h_str = str(uid)
+        reu_h = contar_reu_closer(uid_h_str, own_sub)
         get_squad(own_sub)["closers_ind"].append(
-            build_closer_row(uname, 0, ri["valor"], ri["valor_multi"], ri["qtd"], is_head=True, refs=referidos.get(nn, 0))
+            build_closer_row(uname, 0, ri["valor"], ri["valor_multi"], ri["qtd"], is_head=True, refs=referidos.get(nn, 0), reu=reu_h)
         )
 
     # SDRs — usa criador da atividade para squads em SQUADS_CRIADOR
@@ -584,7 +625,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         t_multi= sum(c["realizado_multi"] for c in ind)
         t_qtd  = sum(c["qtd_ganhos"] for c in ind)
         t_refs = sum(c.get("referidos", 0) for c in ind)
-        return build_closer_row("TOTAL", t_meta, t_real, t_multi, t_qtd, refs=t_refs)
+        t_reu  = sum(c.get("reunioes_closer", 0) for c in ind)
+        return build_closer_row("TOTAL", t_meta, t_real, t_multi, t_qtd, refs=t_refs, reu=t_reu)
 
     def total_sdrs(ind):
         if not ind: return None
