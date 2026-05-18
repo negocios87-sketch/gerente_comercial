@@ -186,6 +186,8 @@
   <div class="tab" onclick="setTab('forecast-reunioes')">Forecast de Reuniões</div>
   <div class="tab" id="tab-overview" style="display:none" onclick="setTab('overview')">Overview</div>
   <div class="tab" onclick="setTab('ranking')">Ranking</div>
+  <div class="tab" onclick="setTab('flags')">Flags Semanal</div>
+  <div class="tab" onclick="setTab('flags')">Flags Semanal</div>
 </div>
 
 <div class="main">
@@ -219,6 +221,11 @@
       <div class="card"><div class="loading"><div class="spinner"></div>Carregando ranking...</div></div>
     </div>
   </div>
+  <div class="panel" id="panel-flags">
+    <div id="flags-content">
+      <div class="card"><div class="loading"><div class="spinner"></div>Carregando flags...</div></div>
+    </div>
+  </div>
 
 </div>
 
@@ -235,8 +242,8 @@ function exportarGanhos() {
 }
 
 function setTab(tab) {
-  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview','ranking'];
-  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview','panel-ranking'];
+  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview','ranking','flags'];
+  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview','panel-ranking','panel-flags'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
   if (tab === 'forecast') fetchForecast();
@@ -244,6 +251,7 @@ function setTab(tab) {
   if (tab === 'forecast-reunioes') fetchForecastReunioes();
   if (tab === 'overview') fetchOverview();
   if (tab === 'ranking') fetchRanking();
+  if (tab === 'flags') fetchFlags();
 }
 
 // ── FORMAT ────────────────────────────────────────────────────
@@ -1473,6 +1481,287 @@ async function fetchRanking() {
     renderRanking(data);
   } catch(e) {
     document.getElementById('ranking-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+
+// ── FLAGS SEMANAL ─────────────────────────────────────────────
+const FLAG_COLORS = {
+  blue:   { bg: '#EFF6FF', border: '#1D4ED8', text: '#1D4ED8', emoji: '🔵' },
+  green:  { bg: '#ECFDF5', border: '#0D7A3E', text: '#0D7A3E', emoji: '🟢' },
+  yellow: { bg: '#FFFBEB', border: '#B8860B', text: '#92400E', emoji: '🟡' },
+  red:    { bg: '#FEF2F2', border: '#B91C1C', text: '#B91C1C', emoji: '🔴' },
+  black:  { bg: '#F9FAFB', border: '#374151', text: '#374151', emoji: '⚫' },
+};
+
+function flagBadge(flag, pct) {
+  const c = FLAG_COLORS[flag] || FLAG_COLORS.black;
+  const pctStr = pct != null ? pct.toFixed(1) + '%' : '—';
+  return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;background:${c.bg};border:1px solid ${c.border};color:${c.text}">${c.emoji} ${pctStr}</span>`;
+}
+
+let flagsExpandidas = {};  // { key: true/false }
+
+function toggleFlagRow(key) {
+  flagsExpandidas[key] = !flagsExpandidas[key];
+  const detail = document.getElementById('flag_detail_' + key);
+  const arrow  = document.getElementById('flag_arrow_' + key);
+  if (detail) detail.style.display = flagsExpandidas[key] ? '' : 'none';
+  if (arrow)  arrow.style.transform = flagsExpandidas[key] ? 'rotate(0deg)' : 'rotate(-90deg)';
+}
+
+function renderFlagTable(pessoas, semanas_labels, tipo) {
+  if (!pessoas.length) return '<p style="color:var(--text-muted);padding:16px">Nenhum dado.</p>';
+
+  const semCols = semanas_labels.map(l =>
+    `<th style="text-align:center;min-width:120px">${l}</th>`).join('');
+
+  let tbody = '';
+  pessoas.forEach((p, i) => {
+    const key = tipo + '_' + i;
+    const semCells = p.semanas.map((s, si) => {
+      const det_key = key + '_' + si;
+      return `<td style="text-align:center">${flagBadge(s.flag, s.pct)}</td>`;
+    }).join('');
+
+    // Detail row content
+    let detailContent = '';
+    if (tipo === 'closer') {
+      detailContent = p.semanas.map(s => `
+        <td style="text-align:center;font-size:11px">
+          <div style="color:var(--text-muted)">Meta: ${R(s.meta)}</div>
+          <div style="color:var(--navy);font-weight:600">Real: ${R(s.realizado)}</div>
+        </td>`).join('');
+    } else {
+      detailContent = p.semanas.map(s => `
+        <td style="text-align:center;font-size:10px">
+          <div style="color:var(--text-muted)">Reu: ${s.real_reu}/${s.meta_reu > 0 ? s.meta_reu.toFixed(1) : '—'}</div>
+          <div style="color:var(--text-muted)">Fin: ${R(s.real_fin)}/${R(s.meta_fin)}</div>
+        </td>`).join('');
+    }
+
+    tbody += `
+      <tr class="row-group" onclick="toggleFlagRow('${key}')" style="cursor:pointer">
+        <td style="padding-left:14px">
+          <div class="name-cell">
+            ${avatarHtml(p.nome)}
+            <div>
+              <div style="font-weight:600">${p.nome}</div>
+              <div style="font-size:10px;color:var(--text-muted)">${p.time}</div>
+            </div>
+          </div>
+          <span id="flag_arrow_${key}" style="display:inline-block;font-size:9px;color:var(--gold);margin-left:6px;transform:rotate(-90deg);transition:transform .2s">▼</span>
+        </td>
+        ${semCells}
+      </tr>
+      <tr id="flag_detail_${key}" style="display:none;background:#FAFBFF">
+        <td style="padding-left:36px;font-size:11px;color:var(--text-muted)">Detalhes</td>
+        ${detailContent}
+      </tr>`;
+  });
+
+  return `<div class="table-scroll"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="background:var(--navy)">
+      <th style="text-align:left;padding:9px 16px;color:rgba(255,255,255,.7);font-size:10px;min-width:200px">Pessoa</th>
+      ${semCols}
+    </tr></thead>
+    <tbody>${tbody}</tbody>
+  </table></div>`;
+}
+
+function renderFlags(data) {
+  const labels = data.semanas_labels || [];
+
+  // Legenda
+  const legenda = `<div class="card" style="padding:12px 18px;margin-bottom:16px">
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+      ${Object.entries(FLAG_COLORS).map(([k,c]) => {
+        const descs = {blue:'≥ 120%', green:'≥ 100%', yellow:'70%–99.9%', red:'20%–69.9%', black:'< 20%'};
+        return `<span style="font-size:11px;font-weight:600;color:${c.text}">${c.emoji} ${k.charAt(0).toUpperCase()+k.slice(1)} Flag — ${descs[k]}</span>`;
+      }).join('')}
+    </div>
+  </div>`;
+
+  let html = legenda;
+
+  html += `<div class="squad-block">
+    <div class="squad-header"><div class="squad-title">Closers</div><div class="squad-divider"></div></div>
+    <div class="card">${renderFlagTable(data.closers || [], labels, 'closer')}</div>
+  </div>`;
+
+  html += `<div class="squad-block">
+    <div class="squad-header"><div class="squad-title">SDR's</div><div class="squad-divider"></div></div>
+    <div class="card">${renderFlagTable(data.sdrs || [], labels, 'sdr')}</div>
+  </div>`;
+
+  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;font-style:italic;margin-top:8px">Atualizado: ${data.atualizado_em}</div>`;
+  document.getElementById('flags-content').innerHTML = html;
+}
+
+async function fetchFlags() {
+  document.getElementById('flags-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Calculando flags...</div></div>';
+  try {
+    const res = await fetch('/api/flags');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderFlags(data);
+  } catch(e) {
+    document.getElementById('flags-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
+
+
+// ── FLAGS SEMANAL ─────────────────────────────────────────────
+function renderFlags(data) {
+  const closers = data.closers || [];
+  const sdrs    = data.sdrs    || [];
+  const labels  = data.semana_labels || [];
+
+  const FLAG_COLORS = {
+    'Blue Flag':   '#1D4ED8',
+    'Green Flag':  '#0D7A3E',
+    'Yellow Flag': '#92400E',
+    'Red Flag':    '#B91C1C',
+    'Black Flag':  '#111827',
+  };
+  const FLAG_BG = {
+    'Blue Flag':   '#EFF6FF',
+    'Green Flag':  '#ECFDF5',
+    'Yellow Flag': '#FFFBEB',
+    'Red Flag':    '#FEF2F2',
+    'Black Flag':  '#F3F4F6',
+  };
+
+  function flagCell(s) {
+    if (!s) return '<td>—</td>';
+    const cor = FLAG_COLORS[s.flag?.label] || '#6B7280';
+    const bg  = FLAG_BG[s.flag?.label]    || '#F9FAFB';
+    const pct = s.pct != null ? s.pct.toFixed(1) + '%' : '—';
+    return `<td style="text-align:center;cursor:pointer" onclick="toggleFlagDetail(this)" 
+      data-meta-fin="${s.meta ?? s.meta_fin ?? ''}"
+      data-real-fin="${s.real ?? s.real_fin ?? ''}"
+      data-meta-reu="${s.meta_reu ?? ''}"
+      data-real-reu="${s.real_reu ?? ''}"
+      data-pct-reu="${s.pct_reu ?? ''}"
+      data-pct-fin="${s.pct_fin ?? ''}"
+      data-is-sdr="${s.meta_reu != null ? '1' : '0'}">
+      <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:4px;background:${bg};color:${cor};font-weight:700;font-size:11px">
+        ${s.flag?.emoji || ''} ${pct}
+      </span>
+    </td>`;
+  }
+
+  function buildTable(pessoas, titulo, isSdr) {
+    if (!pessoas.length) return '';
+    const semCols = labels.map(l => `<th style="text-align:center;min-width:120px">${l}</th>`).join('');
+    const rows = pessoas.map(p => {
+      const semCells = (p.semanas || []).map(s => flagCell(s)).join('');
+      return `<tr>
+        <td><div class="name-cell">${avatarHtml(p.nome)}<span>${p.nome}</span></div></td>
+        <td style="color:var(--text-muted);font-size:11px">${p.time}</td>
+        ${semCells}
+      </tr>`;
+    }).join('');
+
+    return `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${titulo}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div style="padding:10px 16px;background:var(--gold-bg);border-bottom:1px solid var(--border);font-size:10px;color:var(--text-muted)">
+          🔵 ≥120% &nbsp; 🟢 ≥100% &nbsp; 🟡 70–99.9% &nbsp; 🔴 20–69.9% &nbsp; ⚫ &lt;20% &nbsp;
+          <span style="color:var(--text-muted);font-style:italic">Clique na flag para ver detalhes</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:160px">Nome</th>
+              <th style="text-align:left">Time</th>
+              ${semCols}
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const html = buildTable(closers, 'Closers — Flags Semanal', false)
+             + buildTable(sdrs,    'SDR's — Flags Semanal',  true)
+             + `<div style="text-align:right;color:var(--text-muted);font-size:11px;margin-top:8px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
+
+  document.getElementById('flags-content').innerHTML = html;
+}
+
+function toggleFlagDetail(td) {
+  // Remove any existing tooltip
+  const existing = td.querySelector('.flag-tooltip');
+  if (existing) { existing.remove(); return; }
+  document.querySelectorAll('.flag-tooltip').forEach(t => t.remove());
+
+  const isSdr   = td.dataset.isSdr === '1';
+  const metaFin = parseFloat(td.dataset.metaFin) || 0;
+  const realFin = parseFloat(td.dataset.realFin) || 0;
+  const metaReu = parseFloat(td.dataset.metaReu) || 0;
+  const realReu = parseFloat(td.dataset.realReu) || 0;
+  const pctReu  = parseFloat(td.dataset.pctReu)  || 0;
+  const pctFin  = parseFloat(td.dataset.pctFin)  || 0;
+
+  const fmt = v => 'R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
+  const fmtP = v => v.toFixed(1) + '%';
+
+  let rows = '';
+  if (isSdr) {
+    rows = `
+      <div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.15)">
+        <div style="font-size:9px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Reuniões (70%)</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Meta</span><span>${metaReu.toFixed(1)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Real</span><span>${realReu}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-top:2px"><span>%</span><span>${fmtP(pctReu)}</span></div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Financeiro (30%)</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Meta</span><span>${fmt(metaFin)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Real</span><span>${fmt(realFin)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-top:2px"><span>%</span><span>${fmtP(pctFin)}</span></div>
+      </div>`;
+  } else {
+    rows = `
+      <div style="display:flex;justify-content:space-between;font-size:11px"><span>Meta</span><span>${fmt(metaFin)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px"><span>Real (c/Multi)</span><span>${fmt(realFin)}</span></div>`;
+  }
+
+  const tip = document.createElement('div');
+  tip.className = 'flag-tooltip';
+  tip.style.cssText = 'position:absolute;z-index:999;background:#1A1A2E;border:1px solid #B8860B;border-radius:6px;padding:12px;min-width:200px;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.3);font-size:12px';
+  tip.innerHTML = rows;
+
+  td.style.position = 'relative';
+  td.appendChild(tip);
+
+  // Close on outside click
+  setTimeout(() => document.addEventListener('click', function h(e) {
+    if (!td.contains(e.target)) { tip.remove(); document.removeEventListener('click', h); }
+  }), 0);
+}
+
+async function fetchFlags() {
+  document.getElementById('flags-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Carregando flags... (pode demorar um pouco)</div></div>';
+  try {
+    const res = await fetch('/api/flags');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderFlags(data);
+  } catch(e) {
+    document.getElementById('flags-content').innerHTML =
       `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
   }
 }
