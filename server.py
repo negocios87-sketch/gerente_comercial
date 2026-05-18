@@ -270,6 +270,337 @@ def buscar_referidos_mes(mes, ano):
         if nn: contagem[nn] += 1
     return contagem
 
+def buscar_deals_semanas(data_inicio, data_fim):
+    """Busca deals ganhos entre data_inicio e data_fim (YYYY-MM-DD)"""
+    todos, start = [], 0
+    while True:
+        resp = req.get(f"{BASE_V1}/deals", params={
+            "filter_id": FILTER_DEALS,
+            "status": "won",
+            "limit": 500, "start": start,
+            "api_token": API_KEY,
+        }, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        lote = data.get("data") or []
+        for deal in lote:
+            wt = won_time_br(deal)[:10]
+            if data_inicio <= wt <= data_fim:
+                todos.append(deal)
+        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
+        if not mais or not lote: break
+        start += 500
+    return todos
+
+def buscar_activities_semanas(data_inicio, data_fim):
+    """Busca atividades com due_date entre data_inicio e data_fim"""
+    todos, cursor = [], None
+    while True:
+        params = {"filter_id": FILTER_ACTIVITIES, "limit": 200}
+        if cursor: params["cursor"] = cursor
+        resp = req.get(f"{BASE_V2}/activities", params=params,
+                       headers={"x-api-token": API_KEY}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        lote = data.get("data") or []
+        for act in lote:
+            dd = str(act.get("due_date", "") or "")[:10]
+            if data_inicio <= dd <= data_fim:
+                todos.append(act)
+        cursor = data.get("additional_data", {}).get("next_cursor")
+        if not cursor or not lote: break
+    return todos
+
+def semanas_anteriores(n=4):
+    """Retorna as últimas n semanas completas (seg-dom), mais recente primeiro"""
+    hoje = date.today()
+    # Última segunda-feira passada
+    dias_desde_seg = hoje.weekday()  # 0=seg
+    ultima_seg = hoje - timedelta(days=dias_desde_seg + 7)  # semana anterior
+    semanas = []
+    for i in range(n):
+        seg = ultima_seg - timedelta(weeks=i)
+        dom = seg + timedelta(days=6)
+        semanas.append((seg, dom))
+    return semanas  # mais recente primeiro
+
+def calcular_flags(head_filter=None):
+    from collections import defaultdict
+
+    semanas = semanas_anteriores(4)
+    # Range total para buscar dados
+    data_inicio = semanas[-1][0].strftime("%Y-%m-%d")
+    data_fim    = semanas[0][1].strftime("%Y-%m-%d")
+
+    feriados   = buscar_feriados()
+    colab_df   = buscar_colaboradores()
+    users_pipe = buscar_users_pipe()
+    qual_ids   = buscar_qual_ids()
+
+    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
+    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
+
+    nome_to_subarea = {}
+    nome_to_head    = {}
+    nome_to_cargo   = {}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        hd  = str(row.get(head_col, "")).strip() if head_col else ""
+        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
+        nome_to_subarea[nn] = sub
+        nome_to_head[nn]    = hd
+        nome_to_cargo[nn]   = cg
+
+    # Hierarquia
+    if head_filter is None:
+        squads_visiveis = None
+    elif head_filter == "__none__":
+        squads_visiveis = set()
+    elif head_filter.startswith("__squad__:"):
+        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
+    else:
+        head_nn = norm(head_filter)
+        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
+                           if norm(nome_to_head.get(nn, "")) == head_nn and sub}
+
+    def visivel(sub):
+        return squads_visiveis is None or norm(sub) in squads_visiveis
+
+    uid_to_nome      = {uid: name for uid, name in users_pipe.items()}
+    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
+    uid_to_norm      = {uid: norm(name) for uid, name in users_pipe.items()}
+
+    # Busca dados do período completo
+    deals_periodo = buscar_deals_semanas(data_inicio, data_fim)
+    acts_periodo  = buscar_activities_semanas(data_inicio, data_fim)
+    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(None, None) if False else (set(), {})
+
+    # Busca RV (sem filtro de mês)
+    rv_validos = set()
+    rv_owner   = {}
+    start = 0
+    while True:
+        resp = req.get(f"{BASE_V1}/deals", params={
+            "filter_id": FILTER_DEALS_RV,
+            "status": "all_not_deleted",
+            "limit": 500, "start": start,
+            "api_token": API_KEY,
+        }, timeout=30)
+        resp.raise_for_status()
+        data_rv = resp.json()
+        lote_rv = data_rv.get("data") or []
+        for d in lote_rv:
+            rv_validos.add(d["id"])
+            uid = d.get("user_id")
+            rv_owner[d["id"]] = uid.get("id") if isinstance(uid, dict) else uid
+        mais = data_rv.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
+        if not mais or not lote_rv: break
+        start += 500
+
+    for d in deals_periodo:
+        did = d["id"]
+        if did not in rv_owner:
+            uid = d.get("user_id")
+            rv_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
+
+    # Mapa de metas por (nome_norm, ano, mes)
+    metas_cache = {}
+    def get_meta(nn, ano, mes):
+        key = (nn, ano, mes)
+        if key not in metas_cache:
+            metas_cache[key] = buscar_metas_todas(ano, mes)
+        return next((m for m in metas_cache[key] if m["nome_norm"] == nn), None)
+
+    # Feriados como set de dates
+    feriados_set = feriados
+
+    def du_semana_mes(seg, dom, ano_m, mes_m):
+        """Dias úteis da semana que caem no mês ano_m/mes_m"""
+        count = 0
+        d = seg
+        while d <= dom:
+            if d.year == ano_m and d.month == mes_m and d.weekday() < 5 and d not in feriados_set:
+                count += 1
+            d += timedelta(days=1)
+        return count
+
+    def du_mes_util(ano, mes):
+        return du_mes_total(ano, mes, feriados_set)
+
+    def meta_semana(nn, seg, dom):
+        """Meta da semana proporcional, considerando meses diferentes"""
+        meta_total = 0.0
+        d = seg
+        while d <= dom:
+            if d.weekday() < 5 and d not in feriados_set:
+                m = get_meta(nn, d.year, d.month)
+                if m:
+                    du_m = du_mes_util(d.year, d.month)
+                    meta_total += safe_div(m["meta_fin"], du_m) if du_m else 0
+            d += timedelta(days=1)
+        return meta_total
+
+    def meta_reu_semana(nn, seg, dom):
+        """Meta de reuniões da semana proporcional"""
+        meta_total = 0.0
+        d = seg
+        while d <= dom:
+            if d.weekday() < 5 and d not in feriados_set:
+                m = get_meta(nn, d.year, d.month)
+                if m and m["meta_reu"] > 0:
+                    du_m = du_mes_util(d.year, d.month)
+                    meta_total += safe_div(m["meta_reu"] / 10, du_m) if du_m else 0
+            d += timedelta(days=1)
+        return meta_total
+
+    def flag(pct):
+        if pct >= 120: return "blue"
+        if pct >= 100: return "green"
+        if pct >= 70:  return "yellow"
+        if pct >= 20:  return "red"
+        return "black"
+
+    # --- CLOSERS ---
+    metas_list = []
+    for ano_m in {d.year for seg, dom in semanas for d in [seg, dom]}:
+        for mes_m in range(1, 13):
+            metas_list += buscar_metas_todas(ano_m, mes_m)
+
+    closers_norms = {m["nome_norm"] for m in metas_list if m["meta_reu"] == 0 and m["meta_fin"] > 0}
+    sdrs_norms    = {m["nome_norm"] for m in metas_list if m["meta_reu"] > 0  and m["meta_fin"] > 0}
+
+    # Realizado por closer por semana
+    closer_rows = []
+    seen_closers = set()
+    for nn in closers_norms:
+        sub = nome_to_subarea.get(nn, "")
+        if not sub or not visivel(sub): continue
+        if nn in seen_closers: continue
+        seen_closers.add(nn)
+        nome_real = next((name for uid, name in users_pipe.items() if norm(name) == nn),
+                         next((m["nome"] for m in metas_list if m["nome_norm"] == nn), nn))
+        semanas_data = []
+        for seg, dom in semanas:
+            seg_str = seg.strftime("%Y-%m-%d")
+            dom_str = dom.strftime("%Y-%m-%d")
+            meta_s  = meta_semana(nn, seg, dom)
+            real_s  = sum(float(cf(d, CF_MULTIPLICADOR) or 0)
+                          for d in deals_periodo
+                          if norm(get_owner_name(d)) == nn
+                          and seg_str <= won_time_br(d)[:10] <= dom_str)
+            pct_s   = arred(safe_div(real_s, meta_s) * 100) if meta_s else None
+            semanas_data.append({
+                "label":    f"{seg.strftime('%d/%m')}–{dom.strftime('%d/%m')}",
+                "seg":      seg_str,
+                "dom":      dom_str,
+                "meta":     arred(meta_s),
+                "realizado": arred(real_s),
+                "pct":      pct_s,
+                "flag":     flag(pct_s) if pct_s is not None else "black",
+            })
+        closer_rows.append({
+            "nome": nome_real,
+            "time": display_squad(sub),
+            "semanas": semanas_data,
+        })
+    closer_rows.sort(key=lambda r: -(r["semanas"][0]["pct"] or 0))
+
+    # --- SDRs ---
+    sdr_rows = []
+    seen_sdrs = set()
+    for nn in sdrs_norms:
+        sub = nome_to_subarea.get(nn, "")
+        if not sub or not visivel(sub): continue
+        if nn in seen_sdrs: continue
+        seen_sdrs.add(nn)
+        nome_real = next((name for uid, name in users_pipe.items() if norm(name) == nn),
+                         next((m["nome"] for m in metas_list if m["nome_norm"] == nn), nn))
+        uid       = nome_norm_to_uid.get(nn)
+        uid_str   = str(uid) if uid else ""
+        qual_id   = qual_ids.get(nn)
+        semanas_data = []
+        for seg, dom in semanas:
+            seg_str = seg.strftime("%Y-%m-%d")
+            dom_str = dom.strftime("%Y-%m-%d")
+            meta_r  = meta_reu_semana(nn, seg, dom)
+            meta_f_s = meta_semana(nn, seg, dom)
+            # Reuniões validadas na semana (due_date no range)
+            real_reu = sum(1 for a in acts_periodo
+                           if str(a.get("owner_id","")) == uid_str
+                           and seg_str <= str(a.get("due_date",""))[:10] <= dom_str
+                           and (a.get("done") is True or a.get("status") == "done")
+                           and str(a.get("owner_id","")) != str(rv_owner.get(a.get("deal_id"),""))
+                           and a.get("deal_id") in rv_validos)
+            # Financeiro qualificador na semana
+            real_fin = sum(float(cf(d, CF_MULTIPLICADOR) or 0)
+                           for d in deals_periodo
+                           if qual_id and str(cf(d, CF_QUALIFICADOR)) == str(qual_id)
+                           and seg_str <= won_time_br(d)[:10] <= dom_str)
+            pct_r = safe_div(real_reu, meta_r) * 100 if meta_r else 0
+            pct_f = safe_div(real_fin, meta_f_s) * 100 if meta_f_s else 0
+            pct_s = arred(pct_r * 0.70 + pct_f * 0.30)
+            semanas_data.append({
+                "label":     f"{seg.strftime('%d/%m')}–{dom.strftime('%d/%m')}",
+                "seg":       seg_str,
+                "dom":       dom_str,
+                "meta_reu":  arred(meta_r),
+                "real_reu":  real_reu,
+                "meta_fin":  arred(meta_f_s),
+                "real_fin":  arred(real_fin),
+                "pct_reu":   arred(pct_r),
+                "pct_fin":   arred(pct_f),
+                "pct":       pct_s,
+                "flag":      flag(pct_s),
+            })
+        sdr_rows.append({
+            "nome":    nome_real,
+            "time":    display_squad(sub),
+            "semanas": semanas_data,
+        })
+    sdr_rows.sort(key=lambda r: -(r["semanas"][0]["pct"] or 0))
+
+    labels_semanas = [s[0].strftime("%d/%m") + "–" + s[1].strftime("%d/%m") for s in semanas]
+
+    return {
+        "closers":        closer_rows,
+        "sdrs":           sdr_rows,
+        "semanas_labels": labels_semanas,
+        "atualizado_em":  (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/api/flags")
+def api_flags():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        nome_sess  = session.get("nome", "")
+        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
+        if norm(nome_sess) in superusers:
+            head_filter = None
+        else:
+            colab_df = buscar_colaboradores()
+            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
+            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
+            if is_head:
+                head_filter = nome_sess
+            else:
+                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+                lider_sub = None
+                if lider_col:
+                    for _, row in colab_df.iterrows():
+                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
+                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
+                            break
+                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+        return jsonify(limpar_nans(calcular_flags(head_filter=head_filter)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 def buscar_activities_mes(mes, ano):
     todos, cursor = [], None
     mes_str = f"{ano}-{mes:02d}"
@@ -1689,6 +2020,323 @@ def api_overview():
         DENISE_HEADS = {"denise mussolin"}
         is_denise = norm(nome_sess) in DENISE_HEADS
         return jsonify(limpar_nans(calcular_overview(mes=mes, ano=ano, head_filter=head_filter, is_denise=is_denise)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── FLAGS SEMANAL ────────────────────────────────────────────
+
+def get_ultimas_4_semanas():
+    """Retorna as últimas 4 semanas completas (seg-dom) antes da semana atual."""
+    hoje = date.today()
+    # Início da semana atual (segunda-feira)
+    inicio_semana_atual = hoje - timedelta(days=hoje.weekday())
+    semanas = []
+    for i in range(4, 0, -1):
+        seg = inicio_semana_atual - timedelta(weeks=i)
+        dom = seg + timedelta(days=6)
+        semanas.append((seg, dom))
+    return semanas
+
+def meta_diaria_para_data(dt, metas_cache, feriados):
+    """Retorna meta diária (closer=fin, sdr=reu+fin) para uma data específica."""
+    mes, ano = dt.month, dt.year
+    key = (ano, mes)
+    if key not in metas_cache:
+        metas_cache[key] = buscar_metas_todas(ano, mes)
+    du = du_mes_total(ano, mes, feriados)
+    return metas_cache[key], du
+
+def calcular_flags(head_filter=None):
+    from collections import defaultdict
+    import calendar as cal_mod
+
+    feriados   = buscar_feriados()
+    semanas    = get_ultimas_4_semanas()
+    colab_df   = buscar_colaboradores()
+    users_pipe = buscar_users_pipe()
+    qual_ids   = buscar_qual_ids()
+
+    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
+    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
+
+    nome_to_subarea = {}
+    nome_to_head    = {}
+    nome_to_cargo   = {}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        hd  = str(row.get(head_col, "")).strip() if head_col else ""
+        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
+        nome_to_subarea[nn] = sub
+        nome_to_head[nn]    = hd
+        nome_to_cargo[nn]   = cg
+
+    # Hierarquia
+    if head_filter is None:
+        squads_visiveis = None
+    elif head_filter == "__none__":
+        squads_visiveis = set()
+    elif head_filter.startswith("__squad__:"):
+        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
+    else:
+        head_nn = norm(head_filter)
+        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
+                           if norm(nome_to_head.get(nn, "")) == head_nn and sub}
+
+    def visivel(sub):
+        return squads_visiveis is None or norm(sub) in squads_visiveis
+
+    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
+    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
+
+    # Datas cobertas pelas 4 semanas
+    data_min = semanas[0][0]
+    data_max = semanas[-1][1]
+
+    # Busca deals (won) e atividades cobrindo todo o período
+    # Deals: busca mês a mês
+    meses_necessarios = set()
+    d = data_min
+    while d <= data_max:
+        meses_necessarios.add((d.year, d.month))
+        d = date(d.year, d.month, 1) + timedelta(days=32)
+        d = date(d.year, d.month, 1)
+
+    all_deals      = []
+    all_activities = []
+    deal_ids_validos = set()
+    mapa_deal_owner  = {}
+    metas_cache      = {}
+
+    for (ano_m, mes_m) in sorted(meses_necessarios):
+        all_deals      += buscar_deals_mes(mes_m, ano_m)
+        all_activities += buscar_activities_mes(mes_m, ano_m)
+        dv, mo = buscar_deals_rv_mes(mes_m, ano_m)
+        deal_ids_validos |= dv
+        mapa_deal_owner.update(mo)
+
+    # Indexa deals por won_time e atividades por due_date
+    deals_by_date  = defaultdict(list)
+    for deal in all_deals:
+        wt = won_time_br(deal)[:10]
+        if wt: deals_by_date[wt].append(deal)
+
+    acts_by_due_owner = defaultdict(lambda: defaultdict(list))  # due_date -> owner_uid -> acts
+    for act in all_activities:
+        due = str(act.get("due_date", "") or "")[:10]
+        oid = str(act.get("owner_id", ""))
+        if due: acts_by_due_owner[due][oid].append(act)
+
+    def act_valida_flag(act):
+        if not (act.get("done") is True or act.get("status") == "done"): return False
+        deal_id   = act.get("deal_id")
+        act_owner = str(act.get("owner_id", ""))
+        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
+        if act_owner and deal_owner and act_owner == deal_owner: return False
+        if deal_id and deal_id not in deal_ids_validos: return False
+        return True
+
+    # Metas por pessoa
+    metas_all = {}
+    for (ano_m, mes_m) in sorted(meses_necessarios):
+        for m in buscar_metas_todas(ano_m, mes_m):
+            key = (m["nome_norm"], ano_m, mes_m)
+            metas_all[key] = m
+
+    # Flag por atingimento %
+    def get_flag(pct):
+        if pct >= 120:  return {"emoji": "🔵", "label": "Blue Flag",   "cor": "#1D4ED8"}
+        if pct >= 100:  return {"emoji": "🟢", "label": "Green Flag",  "cor": "#0D7A3E"}
+        if pct >= 70.1: return {"emoji": "🟡", "label": "Yellow Flag", "cor": "#92400E"}
+        if pct >= 20:   return {"emoji": "🔴", "label": "Red Flag",    "cor": "#B91C1C"}
+        return          {"emoji": "⚫", "label": "Black Flag",  "cor": "#111827"}
+
+    def label_semana(seg, dom):
+        return f"{seg.strftime('%d/%m')} – {dom.strftime('%d/%m')}"
+
+    # Dias úteis de uma semana (seg-dom) em um mês específico
+    def du_semana_mes(seg, dom, ano_m, mes_m):
+        return sum(1 for i in range((dom-seg).days + 1)
+                   if (seg + timedelta(days=i)).month == mes_m
+                   and (seg + timedelta(days=i)).weekday() < 5
+                   and (seg + timedelta(days=i)) not in feriados)
+
+    # Identifica closers e SDRs ativos
+    closers_metas_set = set()
+    sdrs_metas_set    = set()
+    for (ano_m, mes_m) in sorted(meses_necessarios):
+        for m in buscar_metas_todas(ano_m, mes_m):
+            if m["meta_reu"] == 0 and m["meta_fin"] > 0:
+                closers_metas_set.add(m["nome_norm"])
+            elif m["meta_reu"] > 0 and m["meta_fin"] > 0:
+                sdrs_metas_set.add(m["nome_norm"])
+
+    # Monta resultado por pessoa
+    closers_result = {}
+    sdrs_result    = {}
+
+    # CLOSERS
+    for nn in closers_metas_set:
+        sub = nome_to_subarea.get(nn, "")
+        if not sub or not visivel(sub): continue
+        sub_display = display_squad(sub)
+        uid = nome_norm_to_uid.get(nn)
+        uid_str = str(uid) if uid else ""
+        nome_original = next((name for u, name in users_pipe.items() if norm(name) == nn), nn)
+
+        semanas_data = []
+        for seg, dom in semanas:
+            # Meta proporcional (pode pegar 2 meses)
+            meta_sem = 0.0
+            meses_na_semana = set()
+            for i in range(7):
+                d = seg + timedelta(days=i)
+                if d.weekday() < 5 and d not in feriados:
+                    meses_na_semana.add((d.year, d.month))
+
+            for (ano_m, mes_m) in meses_na_semana:
+                m = metas_all.get((nn, ano_m, mes_m))
+                if not m: continue
+                du_total_mes = du_mes_total(ano_m, mes_m, feriados)
+                du_na_semana = du_semana_mes(seg, dom, ano_m, mes_m)
+                meta_sem += safe_div(m["meta_fin"], du_total_mes) * du_na_semana
+
+            # Realizado: deals won com won_time na semana, owner = closer, valor com multi
+            real_sem = 0.0
+            for i in range(7):
+                d = (seg + timedelta(days=i)).strftime("%Y-%m-%d")
+                for deal in deals_by_date.get(d, []):
+                    own = norm(get_owner_name(deal))
+                    if not own:
+                        oid = get_owner_id(deal)
+                        own = uid_to_nome_norm.get(oid, "")
+                    if own == nn:
+                        real_sem += float(cf(deal, CF_MULTIPLICADOR) or 0)
+
+            pct = arred(safe_div(real_sem, meta_sem) * 100) if meta_sem else 0
+            flag = get_flag(pct)
+            semanas_data.append({
+                "label":  label_semana(seg, dom),
+                "meta":   arred(meta_sem),
+                "real":   arred(real_sem),
+                "pct":    pct,
+                "flag":   flag,
+            })
+
+        closers_result[nn] = {
+            "nome": nome_original,
+            "time": sub_display,
+            "cargo": nome_to_cargo.get(nn, ""),
+            "semanas": semanas_data,
+        }
+
+    # SDRs
+    for nn in sdrs_metas_set:
+        sub = nome_to_subarea.get(nn, "")
+        if not sub or not visivel(sub): continue
+        sub_display = display_squad(sub)
+        uid = nome_norm_to_uid.get(nn)
+        uid_str = str(uid) if uid else ""
+        nome_original = next((name for u, name in users_pipe.items() if norm(name) == nn), nn)
+        qual_id = qual_ids.get(nn)
+
+        semanas_data = []
+        for seg, dom in semanas:
+            meta_reu_sem = 0.0
+            meta_fin_sem = 0.0
+            meses_na_semana = set()
+            for i in range(7):
+                d = seg + timedelta(days=i)
+                if d.weekday() < 5 and d not in feriados:
+                    meses_na_semana.add((d.year, d.month))
+
+            for (ano_m, mes_m) in meses_na_semana:
+                m = metas_all.get((nn, ano_m, mes_m))
+                if not m: continue
+                du_total_mes = du_mes_total(ano_m, mes_m, feriados)
+                du_na_semana = du_semana_mes(seg, dom, ano_m, mes_m)
+                meta_reu_sem += safe_div(m["meta_reu"], du_total_mes) * du_na_semana
+                meta_fin_sem += safe_div(m["meta_fin"], du_total_mes) * du_na_semana
+
+            # Reuniões: due_date na semana, owner = SDR, validadas
+            reu_sem = 0
+            for i in range(7):
+                d = (seg + timedelta(days=i)).strftime("%Y-%m-%d")
+                for act in acts_by_due_owner.get(d, {}).get(uid_str, []):
+                    if act_valida_flag(act):
+                        reu_sem += 1
+
+            # Financeiro: deals ganhos pelo qualificador com won_time na semana
+            fin_sem = 0.0
+            if qual_id:
+                for i in range(7):
+                    d = (seg + timedelta(days=i)).strftime("%Y-%m-%d")
+                    for deal in deals_by_date.get(d, []):
+                        if str(cf(deal, CF_QUALIFICADOR)) == str(qual_id):
+                            fin_sem += float(cf(deal, CF_MULTIPLICADOR) or 0)
+
+            pct_reu = arred(safe_div(reu_sem, meta_reu_sem) * 100) if meta_reu_sem else 0
+            pct_fin = arred(safe_div(fin_sem, meta_fin_sem) * 100) if meta_fin_sem else 0
+            pct     = arred(pct_reu * 0.70 + pct_fin * 0.30)
+            flag    = get_flag(pct)
+            semanas_data.append({
+                "label":       label_semana(seg, dom),
+                "meta_reu":    arred(meta_reu_sem),
+                "real_reu":    reu_sem,
+                "pct_reu":     pct_reu,
+                "meta_fin":    arred(meta_fin_sem),
+                "real_fin":    arred(fin_sem),
+                "pct_fin":     pct_fin,
+                "pct":         pct,
+                "flag":        flag,
+            })
+
+        sdrs_result[nn] = {
+            "nome": nome_original,
+            "time": sub_display,
+            "cargo": nome_to_cargo.get(nn, ""),
+            "semanas": semanas_data,
+        }
+
+    semana_labels = [label_semana(s, d) for s, d in semanas]
+
+    return {
+        "closers":        sorted(closers_result.values(), key=lambda x: x["nome"]),
+        "sdrs":           sorted(sdrs_result.values(), key=lambda x: x["nome"]),
+        "semana_labels":  semana_labels,
+        "atualizado_em":  (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/api/flags")
+def api_flags():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        nome_sess  = session.get("nome", "")
+        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
+        if norm(nome_sess) in superusers:
+            head_filter = None
+        else:
+            colab_df = buscar_colaboradores()
+            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
+            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
+            if is_head:
+                head_filter = nome_sess
+            else:
+                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+                lider_sub = None
+                if lider_col:
+                    for _, row in colab_df.iterrows():
+                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
+                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
+                            break
+                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+        return jsonify(limpar_nans(calcular_flags(head_filter=head_filter)))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
