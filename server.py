@@ -1087,38 +1087,21 @@ def calcular_snapshot():
 
 def enriquecer_snapshot(snapshot_data):
     from collections import defaultdict
-    deals_atuais = buscar_deals_forecast()
-    deal_map = {d["id"]: d for d in deals_atuais}
 
-    # Ganhos reais por squad/closer/dia (won_time UTC-3)
+    # Usa calcular_forecast para pegar os ganhos reais — mesma lógica do Forecast Diário
+    fc_data = calcular_forecast(head_filter=None)
+    fc_squads = fc_data.get("squads", {})
+
+    # Monta ganhos_reais[squad][dia][closer] = valor a partir do forecast
     ganhos_reais = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
-    colab_df_snap = buscar_colaboradores()
-    sub_col_snap  = next((c for c in colab_df_snap.columns if norm(c) == "subarea"), None)
-    nome_col_snap = next((c for c in colab_df_snap.columns if norm(c) == "nome"), "Nome")
-    nome_to_sub_snap = {}
-    for _, row in colab_df_snap.iterrows():
-        nn  = norm(str(row.get(nome_col_snap, "")))
-        sub = str(row.get(sub_col_snap, "")).strip() if sub_col_snap else ""
-        nome_to_sub_snap[nn] = sub
+    for sq_name, sq_data in fc_squads.items():
+        for row in sq_data.get("rows", []):
+            dia = row["dia"]
+            for closer_data in row.get("closers", []):
+                if closer_data.get("realizado", 0) > 0:
+                    ganhos_reais[sq_name][dia][closer_data["nome"]] += closer_data["realizado"]
 
-    users_snap = buscar_users_pipe()
-    uid_to_norm_snap = {uid: norm(name) for uid, name in users_snap.items()}
-
-    for d in deals_atuais:
-        if d.get("status") != "won": continue
-        wt = won_time_br(d)[:10]
-        if not wt: continue
-        owner_nn = norm(d.get("owner_name", ""))
-        if not owner_nn:
-            oid = d.get("owner_id")
-            owner_nn = uid_to_norm_snap.get(oid, "")
-        if not owner_nn: continue
-        sub = nome_to_sub_snap.get(owner_nn, "")
-        if not sub: continue
-        sub_display = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
-        owner_nome_original = next((name for uid, name in users_snap.items() if norm(name) == owner_nn), owner_nn)
-        valor = float(d.get("value") or 0)
-        ganhos_reais[sub_display][wt][owner_nome_original] += valor
+    deal_map = {d["id"]: d for d in buscar_deals_forecast()}
 
     result = {}
     for squad, days in snapshot_data.items():
@@ -1133,7 +1116,6 @@ def enriquecer_snapshot(snapshot_data):
                     media = valor * (prob / 100)
                     c_totals["media_prevista"] += media
                     day_totals["media_prevista"] += media
-                    # Status do deal (para exibição nos deals)
                     atual = deal_map.get(d["id"])
                     if not atual:
                         status_atual = "ganho"
@@ -1146,12 +1128,11 @@ def enriquecer_snapshot(snapshot_data):
                             if new_date != d["expected_close_date_original"]:
                                 status_atual = "remanejado"
                     c_totals["deals"].append({**d, "status_atual": status_atual})
-                # Ganho real = won_time caindo naquele dia para aquele closer
-                ganho_real = ganhos_reais.get(squad, {}).get(dt, {}).get(closer, 0.0)
-                c_totals["ganho"] = ganho_real
+                # Ganho real do closer naquele dia — direto do forecast
+                c_totals["ganho"] = ganhos_reais.get(squad, {}).get(dt, {}).get(closer, 0.0)
                 day_totals["closers"][closer] = c_totals
 
-            # Ganho total do dia = soma de todos os closers reais naquele dia
+            # Total do dia = soma de todos os closers no forecast para aquele squad/dia
             day_totals["ganho"] = sum(ganhos_reais.get(squad, {}).get(dt, {}).values())
             total_prev = day_totals["media_prevista"]
             day_totals["pct_atingimento"] = arred(day_totals["ganho"]/total_prev*100) if total_prev else None
