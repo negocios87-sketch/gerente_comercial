@@ -1,0 +1,264 @@
+{
+  "Elite": {
+    "2026-05-19": {
+      "Leandro Desidério": [
+        {
+          "id": 49749,
+          "titulo": "Pedro Maciel",
+          "valor": 14990.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Willian Maia": [
+        {
+          "id": 328730,
+          "titulo": "Domingos Neto",
+          "valor": 39976.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 335783,
+          "titulo": "Francinerio Cordeiro",
+          "valor": 22984.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 337713,
+          "titulo": "Lucas Guzen",
+          "valor": 23990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ]
+    }
+  },
+  "MGM": {
+    "2026-05-19": {
+      "Alessandra Costa": [
+        {
+          "id": 111097,
+          "titulo": "Marcelo Dias",
+          "valor": 11880.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 164536,
+          "titulo": "Marcelo Matos",
+          "valor": 14990.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 306895,
+          "titulo": "Fernando Santos",
+          "valor": 10990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 308282,
+          "titulo": "Alan Viller",
+          "valor": 11880.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 338466,
+          "titulo": "Alex Reche Franco",
+          "valor": 18970.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 361368,
+          "titulo": "Marcelo Antonelli Guaragni",
+          "valor": 31990.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 366294,
+          "titulo": "Marcelo Pinto",
+          "valor": 5980.0,
+          "probabilidade": null,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Natalia Vaz": [
+        {
+          "id": 284893,
+          "titulo": "João Fonseca ",
+          "valor": 11880.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 317657,
+          "titulo": "Fabio Turati",
+          "valor": 11880.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 340552,
+          "titulo": "Ricardo Ballarotte ",
+          "valor": 11880.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 365991,
+          "titulo": "Ana Paula Maximiliano",
+          "valor": 11880.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Denise Mussolin": [
+        {
+          "id": 355543,
+          "titulo": "Fernando Gomes",
+          "valor": 33490.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Suellyn Leite": [
+        {
+          "id": 366518,
+          "titulo": "Jorge",
+          "valor": 5980.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Mayara Rodrigues": [
+        {
+          "id": 367108,
+          "titulo": "Ernani Andrade",
+          "valor": 3000.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ]
+    }
+  },
+  "LATAM": {
+    "2026-05-19": {
+      "Thiago Santos": [
+        {
+          "id": 246457,
+          "titulo": "Juan Francisco Jardel Alonso",
+          "valor": 22910.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Larissa Vitor": [
+        {
+          "id": 359170,
+          "titulo": "Raul Navarro",
+          "valor": 18850.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 365170,
+          "titulo": "Patricia Sanchez Camara",
+          "valor": 18850.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Wellington Andrade": [
+        {
+          "id": 360480,
+          "titulo": "Mauricio Sarasúa",
+          "valor": 20100.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Luanna Martins": [
+        {
+          "id": 361996,
+          "titulo": "Daniel Carrizales Maldonado",
+          "valor": 22910.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Sarah Leite": [
+        {
+          "id": 366605,
+          "titulo": "Rafael Boylan",
+          "valor": 23990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ]
+    }
+  },
+  "Sniper": {
+    "2026-05-19": {
+      "Pompeu Filho": [
+        {
+          "id": 291168,
+          "titulo": "Maycon Bispo Cardoso",
+          "valor": 23990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Camila Cardoso": [
+        {
+          "id": 351840,
+          "titulo": "Carlos Henrique B. Oliveira Zanardini",
+          "valor": 23990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ],
+      "Alisson Barbosa": [
+        {
+          "id": 360547,
+          "titulo": "Camila Santa Maria",
+          "valor": 10980.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 364830,
+          "titulo": "Márcio Merçoni",
+          "valor": 20994.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ]
+    }
+  },
+  "Orion": {
+    "2026-05-19": {
+      "Gabriela Turetta": [
+        {
+          "id": 356212,
+          "titulo": "Simone Souza",
+          "valor": 23990.0,
+          "probabilidade": 0,
+          "expected_close_date_original": "2026-05-19"
+        },
+        {
+          "id": 361291,
+          "titulo": "César ",
+          "valor": 23990.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-19"
+        }
+      ]
+    }
+  }
+}
