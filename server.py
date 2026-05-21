@@ -1030,26 +1030,33 @@ def calcular_forecast(head_filter=None):
         t = {k: sum(r[k] for r in rows) for k in ["p20","p50","p70","media","em_aberto","realizado","perda","total_previsto"]}
         t_ating = arred(t["realizado"]/t["total_previsto"]*100) if t["total_previsto"] else None
         result[squad] = {"rows": rows, "total": {**{k:arred(v) for k,v in t.items()}, "atingimento": t_ating}}
-    # Resumo do dia de hoje para Time Denise e Geral
-    hoje_str_fc = date.today().strftime("%Y-%m-%d")
-    DENISE_FC   = {"sniper", "elite", "olympus", "mgm"}
-    GERAL_FC    = {"sniper", "elite", "olympus", "mgm", "latam", "orion"}
+    # Resumo do dia de hoje e ontem para Time Denise e Geral
+    hoje_str_fc   = date.today().strftime("%Y-%m-%d")
+    ontem_str_fc  = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    DENISE_FC     = {"sniper", "elite", "olympus", "mgm"}
+    GERAL_FC      = {"sniper", "elite", "olympus", "mgm", "latam", "orion", "zenite"}
 
-    def resumo_hoje(squad_names):
-        r = {"prevista": 0.0, "ag_no_dia": 0, "ag_p_outros": 0,
-             "realizada": 0.0, "perda": 0.0, "media": 0.0,
+    def resumo_dia(squad_names, dia_str):
+        r = {"prevista": 0.0, "perda": 0.0, "media": 0.0,
              "p20": 0.0, "p50": 0.0, "p70": 0.0, "em_aberto": 0.0}
+        # Ganhos reais do dia pelo won_time (direto das rows do forecast)
+        realizado = 0.0
         for sq_name, sq_data in result.items():
             if norm(sq_name) not in squad_names: continue
             for row in sq_data.get("rows", []):
-                if row["dia"] == hoje_str_fc:
-                    for k in r: r[k] = r.get(k,0) + row.get(k, 0)
+                if row["dia"] == dia_str:
+                    for k in r: r[k] = r.get(k, 0) + row.get(k, 0)
+                    realizado += row.get("realizado", 0)
+        r["realizado"] = arred(realizado)
         return {k: arred(v) for k, v in r.items()}
 
     resumo_fc = {
-        "time_denise": resumo_hoje(DENISE_FC),
-        "geral":       resumo_hoje(GERAL_FC),
-        "hoje":        hoje_str_fc,
+        "time_denise": resumo_dia(DENISE_FC, hoje_str_fc),
+        "geral":       resumo_dia(GERAL_FC,  hoje_str_fc),
+        "time_denise_ontem": resumo_dia(DENISE_FC, ontem_str_fc),
+        "geral_ontem":       resumo_dia(GERAL_FC,  ontem_str_fc),
+        "hoje":  hoje_str_fc,
+        "ontem": ontem_str_fc,
     }
     return {"squads": result, "resumo": resumo_fc, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}
 
