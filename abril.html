@@ -566,7 +566,7 @@ function resumoFcRow(label, r, highlight) {
     <td class="col-fc">${R(r.p70||0)}</td>
     <td class="col-fc fc-media-val">${R(r.media||0)}</td>
     <td class="col-fc fc-gray">${R(r.em_aberto||0)}</td>
-    <td class="col-fc" style="color:${(r.realizada||r.realizado||0)>0?'var(--green)':'var(--text-muted)'}">${R(r.realizada||r.realizado||0)}</td>
+    <td class="col-fc" style="color:${(r.realizado||0)>0?'var(--green)':'var(--text-muted)'};font-weight:700">${R(r.realizado||0)}</td>
     <td class="col-fc" style="color:${(r.perda||0)>0?'var(--red)':'var(--text-muted)'}">${R(r.perda||0)}</td>
     <td class="col-fc fc-total-bold">${R((r.em_aberto||0)+(r.realizada||r.realizado||0)+(r.perda||0))}</td>
     <td class="col-fc">—</td>
@@ -590,7 +590,7 @@ function renderForecast(data) {
     html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="background:var(--navy)">
-          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO HOJE — ${resumo.hoje||''}</th>
+          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO — Hoje: ${resumo.hoje||''} | Ontem: ${resumo.ontem||''}</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">20%</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">50%</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">70%</th>
@@ -602,8 +602,10 @@ function renderForecast(data) {
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">% Ating.</th>
         </tr></thead>
         <tbody>
-          ${resumo.time_denise ? resumoFcRow('🔶 Time Denise (Sniper + Elite + Olympus)', resumo.time_denise, true) : ''}
-          ${resumo.geral ? resumoFcRow('🔷 Geral (Todos os times)', resumo.geral, false) : ''}
+          ${resumo.time_denise ? resumoFcRow('🔶 Hoje — Time Denise', resumo.time_denise, true) : ''}
+          ${resumo.geral ? resumoFcRow('🔷 Hoje — Geral', resumo.geral, false) : ''}
+          ${resumo.time_denise_ontem ? resumoFcRow('◀ Ontem — Time Denise', resumo.time_denise_ontem, true) : ''}
+          ${resumo.geral_ontem ? resumoFcRow('◀ Ontem — Geral', resumo.geral_ontem, false) : ''}
         </tbody>
       </table>
     </div>`;
@@ -911,7 +913,7 @@ function renderForecastReunioes(data) {
     html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="background:var(--navy)">
-          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO HOJE — ${resumo.hoje||''}</th>
+          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO — Hoje: ${resumo.hoje||''} | Ontem: ${resumo.ontem||''}</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Prevista</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. no Dia</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. p/ Outros</th>
