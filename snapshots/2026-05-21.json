@@ -1,0 +1,162 @@
+{
+  "MGM": {
+    "2026-05-21": {
+      "Natalia Vaz": [
+        {
+          "id": 169110,
+          "titulo": "Marco Condado",
+          "valor": 5500.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 367410,
+          "titulo": "Neusa Andrade 1/2",
+          "valor": 500.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ],
+      "Alessandra Costa": [
+        {
+          "id": 279729,
+          "titulo": "Paulo Chaves de Resende",
+          "valor": 29990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 358761,
+          "titulo": "Amália /2 (cópia)",
+          "valor": 9483.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 367404,
+          "titulo": "Cristiano Santos",
+          "valor": 5424.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ],
+      "Vander Alves": [
+        {
+          "id": 322487,
+          "titulo": "Sylvana Paiva",
+          "valor": 11880.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ]
+    }
+  },
+  "Elite": {
+    "2026-05-21": {
+      "Willian Maia": [
+        {
+          "id": 174871,
+          "titulo": "Sérgio Bello",
+          "valor": 23990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 335783,
+          "titulo": "Francinerio Cordeiro",
+          "valor": 22984.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 337713,
+          "titulo": "Lucas Guzen",
+          "valor": 23990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 364922,
+          "titulo": "Marco Cappelozza",
+          "valor": 39000.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 365334,
+          "titulo": "Adelson",
+          "valor": 20990.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ],
+      "Fabio Perim": [
+        {
+          "id": 360970,
+          "titulo": "Yuri Mota Fiterman",
+          "valor": 23980.0,
+          "probabilidade": null,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ]
+    }
+  },
+  "Sniper": {
+    "2026-05-21": {
+      "Camila Cardoso": [
+        {
+          "id": 216335,
+          "titulo": "Elivaldo Simões",
+          "valor": 23990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ],
+      "Alisson Souza": [
+        {
+          "id": 278863,
+          "titulo": "clodoaldo",
+          "valor": 11880.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 360547,
+          "titulo": "Camila Santa Maria",
+          "valor": 11880.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-21"
+        },
+        {
+          "id": 366252,
+          "titulo": "José de Ribamar Sousa Pereira",
+          "valor": 11880.0,
+          "probabilidade": 70,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ],
+      "Francisco Martins": [
+        {
+          "id": 338191,
+          "titulo": "Nardeli Galvão",
+          "valor": 14990.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ]
+    }
+  },
+  "LATAM": {
+    "2026-05-21": {
+      "Thiago Santos": [
+        {
+          "id": 360310,
+          "titulo": "Mauricio Razo",
+          "valor": 22910.0,
+          "probabilidade": 20,
+          "expected_close_date_original": "2026-05-21"
+        }
+      ]
+    }
+  }
+}
