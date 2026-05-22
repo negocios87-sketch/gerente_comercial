@@ -1777,6 +1777,97 @@ def api_ranking():
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
 
+
+# ── ORGANOGRAMA ───────────────────────────────────────────────
+
+def calcular_organograma():
+    from collections import defaultdict
+    colab_df = buscar_colaboradores()
+
+    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
+    head_col  = next((c for c in colab_df.columns if "head" in norm(c) and "nivel" in norm(c)), None)
+    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+    status_col= next((c for c in colab_df.columns if "status" in norm(c)), None)
+
+    FOTO_BASE = "https://raw.githubusercontent.com/negocios87-sketch/fotos_time_comercial/main"
+
+    squads = defaultdict(lambda: {"head": None, "lideres": defaultdict(list), "sem_lider": []})
+
+    for _, row in colab_df.iterrows():
+        if status_col and norm(str(row.get(status_col, ""))) != "ativo":
+            continue
+        nome  = str(row.get(nome_col, "")).strip()
+        sub   = str(row.get(sub_col, "")).strip() if sub_col else ""
+        cargo = str(row.get(cargo_col, "")).strip() if cargo_col else ""
+        head  = str(row.get(head_col, "")).strip() if head_col else ""
+        lider = str(row.get(lider_col, "")).strip() if lider_col else ""
+
+        if not nome or not sub: continue
+        sub_display = display_squad(sub)
+
+        pessoa = {
+            "nome":  nome,
+            "cargo": cargo,
+            "foto":  f"{FOTO_BASE}/{nome}.jpg",
+            "lider": lider,
+            "head":  head,
+        }
+
+        # É head do squad?
+        if nome == head:
+            squads[sub_display]["head"] = pessoa
+        elif lider and lider != nome:
+            squads[sub_display]["lideres"][lider].append(pessoa)
+        else:
+            squads[sub_display]["sem_lider"].append(pessoa)
+
+    # Monta estrutura final
+    result = []
+    ORDER = ["Sniper","Elite","Olympus","LATAM","Orion","Zenite"]
+    all_squads = ORDER + [s for s in squads if s not in ORDER]
+
+    for sub in all_squads:
+        if sub not in squads: continue
+        sq = squads[sub]
+
+        lideres_out = []
+        for lider_nome, membros in sq["lideres"].items():
+            # Acha dados do lider
+            lider_pessoa = next((m for m in membros if norm(m["nome"]) == norm(lider_nome)), None)
+            if not lider_pessoa:
+                lider_pessoa = {"nome": lider_nome, "cargo": "Team Leader",
+                                "foto": f"{FOTO_BASE}/{lider_nome}.jpg", "lider": "", "head": ""}
+            membros_sem_lider = [m for m in membros if norm(m["nome"]) != norm(lider_nome)]
+            lideres_out.append({"lider": lider_pessoa, "membros": membros_sem_lider})
+
+        result.append({
+            "squad": sub,
+            "head": sq["head"],
+            "lideres": lideres_out,
+            "sem_lider": sq["sem_lider"],
+        })
+
+    return {
+        "squads": result,
+        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/organograma")
+def organograma():
+    if "nome" not in session: return redirect("/login")
+    return render_template("organograma.html", nome=session["nome"])
+
+@app.route("/api/organograma")
+def api_organograma():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        return jsonify(limpar_nans(calcular_organograma()))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
