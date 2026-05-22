@@ -1784,17 +1784,17 @@ def calcular_organograma():
     from collections import defaultdict
     colab_df = buscar_colaboradores()
 
-    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
-    head_col  = next((c for c in colab_df.columns if "head" in norm(c) and "nivel" in norm(c)), None)
-    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-    status_col= next((c for c in colab_df.columns if "status" in norm(c)), None)
+    sub_col    = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col   = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    cargo_col  = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
+    head_col   = next((c for c in colab_df.columns if "head" in norm(c) and "nivel" in norm(c)), None)
+    lider_col  = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+    status_col = next((c for c in colab_df.columns if "status" in norm(c)), None)
 
     FOTO_BASE = "https://raw.githubusercontent.com/negocios87-sketch/fotos_time_comercial/main"
 
-    squads = defaultdict(lambda: {"head": None, "lideres": defaultdict(list), "sem_lider": []})
-
+    # Coleta todos os membros ativos
+    membros = []
     for _, row in colab_df.iterrows():
         if status_col and norm(str(row.get(status_col, ""))) != "ativo":
             continue
@@ -1803,50 +1803,65 @@ def calcular_organograma():
         cargo = str(row.get(cargo_col, "")).strip() if cargo_col else ""
         head  = str(row.get(head_col, "")).strip() if head_col else ""
         lider = str(row.get(lider_col, "")).strip() if lider_col else ""
-
         if not nome or not sub: continue
-        sub_display = display_squad(sub)
+        membros.append({
+            "nome": nome, "sub": sub, "cargo": cargo,
+            "head": head, "lider": lider,
+            "foto": f"{FOTO_BASE}/{nome}.jpg",
+        })
 
-        pessoa = {
-            "nome":  nome,
-            "cargo": cargo,
-            "foto":  f"{FOTO_BASE}/{nome}.jpg",
-            "lider": lider,
-            "head":  head,
-        }
+    # Agrupa por squad
+    por_squad = defaultdict(list)
+    for m in membros:
+        por_squad[display_squad(m["sub"])].append(m)
 
-        # É head do squad?
-        if nome == head:
-            squads[sub_display]["head"] = pessoa
-        elif lider and lider != nome:
-            squads[sub_display]["lideres"][lider].append(pessoa)
-        else:
-            squads[sub_display]["sem_lider"].append(pessoa)
-
-    # Monta estrutura final
     result = []
-    ORDER = ["Sniper","Elite","Olympus","LATAM","Orion","Zenite"]
-    all_squads = ORDER + [s for s in squads if s not in ORDER]
+    ORDER = ["Sniper", "Elite", "Olympus", "LATAM", "Orion", "Zenite"]
+    all_squads = ORDER + [s for s in por_squad if s not in ORDER]
 
-    for sub in all_squads:
-        if sub not in squads: continue
-        sq = squads[sub]
+    for squad in all_squads:
+        pessoas = por_squad.get(squad)
+        if not pessoas: continue
 
-        lideres_out = []
-        for lider_nome, membros in sq["lideres"].items():
-            # Acha dados do lider
-            lider_pessoa = next((m for m in membros if norm(m["nome"]) == norm(lider_nome)), None)
-            if not lider_pessoa:
-                lider_pessoa = {"nome": lider_nome, "cargo": "Team Leader",
-                                "foto": f"{FOTO_BASE}/{lider_nome}.jpg", "lider": "", "head": ""}
-            membros_sem_lider = [m for m in membros if norm(m["nome"]) != norm(lider_nome)]
-            lideres_out.append({"lider": lider_pessoa, "membros": membros_sem_lider})
+        nomes = {norm(p["nome"]) for p in pessoas}
+
+        # HEAD = pessoa cujo head == nome próprio (ou cujo head está fora do squad)
+        heads = [p for p in pessoas if norm(p["head"]) == norm(p["nome"])]
+        # Se ninguém se auto-referencia como head, pega quem tem head fora do squad
+        if not heads:
+            heads = [p for p in pessoas if p["head"] and norm(p["head"]) not in nomes]
+
+        head_pessoa = heads[0] if heads else None
+        head_nn = norm(head_pessoa["nome"]) if head_pessoa else None
+
+        # LÍDERES = pessoas cujo lider == nome próprio (mas não é head)
+        lideres = [p for p in pessoas
+                   if norm(p["lider"]) == norm(p["nome"])
+                   and norm(p["nome"]) != head_nn]
+
+        lider_nns = {norm(l["nome"]) for l in lideres}
+
+        # Agrupa membros por líder
+        branches = []
+        for lider in lideres:
+            lider_nn = norm(lider["nome"])
+            membros_do_lider = [p for p in pessoas
+                                if norm(p["lider"]) == lider_nn
+                                and norm(p["nome"]) != lider_nn
+                                and norm(p["nome"]) != head_nn]
+            branches.append({"lider": lider, "membros": membros_do_lider})
+
+        # Sem líder definido (nem head, nem lider, nem membro de alguém)
+        alocados = {head_nn} | lider_nns | {norm(m["nome"]) for b in branches for m in b["membros"]}
+        sem_lider = [p for p in pessoas
+                     if norm(p["nome"]) not in alocados
+                     and norm(p["nome"]) != head_nn]
 
         result.append({
-            "squad": sub,
-            "head": sq["head"],
-            "lideres": lideres_out,
-            "sem_lider": sq["sem_lider"],
+            "squad": squad,
+            "head": head_pessoa,
+            "lideres": branches,
+            "sem_lider": sem_lider,
         })
 
     return {
