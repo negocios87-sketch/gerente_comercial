@@ -186,6 +186,7 @@
   <div class="tab" onclick="setTab('forecast-reunioes')">Forecast de Reuniões</div>
   <div class="tab" id="tab-overview" style="display:none" onclick="setTab('overview')">Overview</div>
   <div class="tab" onclick="setTab('ranking')">Ranking</div>
+  <div class="tab" onclick="setTab('organograma')">Organograma</div>
 </div>
 
 <div class="main">
@@ -236,8 +237,8 @@ function exportarGanhos() {
 }
 
 function setTab(tab) {
-  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview','ranking'];
-  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview','panel-ranking'];
+  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview','ranking','organograma'];
+  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview','panel-ranking','panel-organograma'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
   if (tab === 'forecast') fetchForecast();
@@ -245,6 +246,7 @@ function setTab(tab) {
   if (tab === 'forecast-reunioes') fetchForecastReunioes();
   if (tab === 'overview') fetchOverview();
   if (tab === 'ranking') fetchRanking();
+  if (tab === 'organograma') fetchOrganograma();
 }
 
 // ── FORMAT ────────────────────────────────────────────────────
@@ -1481,6 +1483,140 @@ async function fetchRanking() {
 }
 
 
+
+
+// ── ORGANOGRAMA ───────────────────────────────────────────────
+function orgAvatarHtml(nome, size) {
+  const initials = nome.split(' ').slice(0,2).map(p => p[0]?.toUpperCase() || '').join('');
+  const sz  = size === 'lg' ? 56 : size === 'sm' ? 44 : 38;
+  const border = size === 'lg' ? '3px solid var(--gold)' : size === 'sm' ? '2px solid var(--navy)' : '2px solid var(--border)';
+  const id  = 'av_org_' + Math.random().toString(36).slice(2);
+  return `<div style="position:relative;width:${sz}px;height:${sz}px;flex-shrink:0">
+    <img style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;border:${border};position:absolute;top:0;left:0"
+      id="${id}" src="${FOTO_BASE}${encodeURIComponent(nome)}.jpg" alt="${nome}"
+      onerror="orgTryExt(this,'${encodeURIComponent(nome)}','${id}_fb')">
+    <div id="${id}_fb" style="width:${sz}px;height:${sz}px;border-radius:50%;background:var(--navy);border:${border};display:none;align-items:center;justify-content:center;color:var(--gold);font-size:${Math.round(sz*0.28)}px;font-weight:700;position:absolute;top:0;left:0">${initials}</div>
+  </div>`;
+}
+
+function orgTryExt(img, enc, fbId) {
+  const src = img.src;
+  if      (src.endsWith('.jpg'))  img.src = FOTO_BASE + enc + '.jpeg';
+  else if (src.endsWith('.jpeg')) img.src = FOTO_BASE + enc + '.png';
+  else if (src.endsWith('.png'))  img.src = FOTO_BASE + enc + '.JPG';
+  else {
+    img.style.display = 'none';
+    const fb = document.getElementById(fbId);
+    if (fb) fb.style.display = 'flex';
+  }
+}
+
+function orgBadge(cargo) {
+  const c = (cargo||'').toLowerCase();
+  if (c.includes('head') || c.includes('gerente'))         return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:var(--gold-bg);color:var(--gold);border:1px solid var(--gold);text-transform:uppercase;letter-spacing:.5px">HEAD</span>';
+  if (c.includes('team leader') || c.includes('lider'))    return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:#EEF2FF;color:var(--navy);border:1px solid var(--navy);text-transform:uppercase;letter-spacing:.5px">LÍDER</span>';
+  if (c.includes('sdr') || c.includes('hunter'))           return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:#ECFDF5;color:#0D7A3E;border:1px solid #0D7A3E;text-transform:uppercase;letter-spacing:.5px">SDR</span>';
+  if (c.includes('closer') || c.includes('executiv'))      return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:#FEF3C7;color:#92400E;border:1px solid #92400E;text-transform:uppercase;letter-spacing:.5px">CLOSER</span>';
+  return '';
+}
+
+function orgCard(p, size, extraStyle='') {
+  const bgStyle = size === 'lg' ? 'background:var(--gold-bg);border:2px solid var(--gold)' :
+                  size === 'sm' ? 'background:#F8F9FF;border:2px solid var(--navy)' :
+                                  'background:var(--white);border:1px solid var(--border)';
+  return `<div style="${bgStyle};${extraStyle};border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:120px;max-width:140px;box-shadow:0 2px 8px rgba(0,0,0,.07)">
+    ${orgAvatarHtml(p.nome, size)}
+    <div style="font-size:11px;font-weight:700;color:var(--navy);text-align:center;line-height:1.3">${p.nome.split(' ').slice(0,2).join(' ')}</div>
+    <div style="font-size:9px;color:var(--text-muted);text-align:center;text-transform:uppercase;letter-spacing:.5px">${p.cargo}</div>
+    ${orgBadge(p.cargo)}
+  </div>`;
+}
+
+const LINE = 'background:var(--border)';
+
+function renderOrganograma(data) {
+  let html = '';
+
+  (data.squads || []).forEach(sq => {
+    html += `<div style="margin-bottom:48px">
+      <div style="font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:24px;display:flex;align-items:center;gap:8px">
+        <span style="width:3px;height:14px;background:var(--gold);border-radius:2px;display:inline-block"></span>${sq.squad}
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center">`;
+
+    const temFilhos = sq.lideres.length > 0 || sq.sem_lider.length > 0;
+
+    // HEAD
+    if (sq.head) {
+      html += orgCard(sq.head, 'lg');
+      if (temFilhos) html += `<div style="width:2px;height:28px;${LINE};margin:0 auto"></div>`;
+    }
+
+    if (temFilhos) {
+      const allBranches = [
+        ...sq.lideres.map(b => ({ type: 'lider', data: b })),
+        ...sq.sem_lider.map(m => ({ type: 'membro', data: m })),
+      ];
+      const n = allBranches.length;
+
+      html += `<div style="display:flex;gap:32px;align-items:flex-start;position:relative">`;
+
+      // Horizontal line across top
+      if (n > 1) {
+        html += `<div style="position:absolute;top:0;left:0;right:0;height:2px;${LINE}"></div>`;
+      }
+
+      allBranches.forEach(branch => {
+        html += `<div style="display:flex;flex-direction:column;align-items:center;position:relative">`;
+        // Vertical line down to card
+        html += `<div style="width:2px;height:28px;${LINE};margin:0 auto"></div>`;
+
+        if (branch.type === 'lider') {
+          html += orgCard(branch.data.lider, 'sm');
+          if (branch.data.membros.length > 0) {
+            html += `<div style="width:2px;height:20px;${LINE};margin:0 auto"></div>`;
+            const nm = branch.data.membros.length;
+            html += `<div style="display:flex;gap:10px;align-items:flex-start;position:relative">`;
+            if (nm > 1) html += `<div style="position:absolute;top:0;left:0;right:0;height:2px;${LINE}"></div>`;
+            branch.data.membros.forEach(m => {
+              html += `<div style="display:flex;flex-direction:column;align-items:center">
+                <div style="width:2px;height:20px;${LINE};margin:0 auto"></div>
+                ${orgCard(m, 'xs')}
+              </div>`;
+            });
+            html += `</div>`;
+          }
+        } else {
+          html += orgCard(branch.data, 'xs');
+        }
+        html += `</div>`;
+      });
+
+      html += `</div>`;
+    }
+
+    html += `</div></div>`;
+  });
+
+  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;font-style:italic;margin-top:8px">Atualizado: ${data.atualizado_em}</div>`;
+  document.getElementById('organograma-content').innerHTML = html;
+}
+
+async function fetchOrganograma() {
+  document.getElementById('organograma-content').innerHTML =
+    '<div class="card"><div class="loading"><div class="spinner"></div>Montando organograma...</div></div>';
+  try {
+    const res = await fetch('/api/organograma');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.erro) throw new Error(data.erro);
+    renderOrganograma(data);
+  } catch(e) {
+    document.getElementById('organograma-content').innerHTML =
+      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
+  }
+}
 
 // Init
 const hoje = new Date();
