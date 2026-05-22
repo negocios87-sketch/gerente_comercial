@@ -1616,7 +1616,9 @@ async function fetchOrganograma() {
   document.getElementById('organograma-content').innerHTML =
     '<div class="card"><div class="loading"><div class="spinner"></div>Montando organograma...</div></div>';
   try {
-    const res = await fetch('/api/organograma');
+    const mes = document.getElementById('sel-mes')?.value || '';
+    const ano = document.getElementById('sel-ano')?.value || '';
+    const res = await fetch(`/api/organograma?mes=${mes}&ano=${ano}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.erro) throw new Error(data.erro);
