@@ -1780,9 +1780,12 @@ def api_ranking():
 
 # ── ORGANOGRAMA ───────────────────────────────────────────────
 
-def calcular_organograma():
+def calcular_organograma(mes=None, ano=None):
     from collections import defaultdict
-    colab_df = buscar_colaboradores()
+    hoje = date.today()
+    mes  = mes or hoje.month
+    ano  = ano or hoje.year
+    colab_df = buscar_colaboradores(mes=mes, ano=ano)
 
     sub_col    = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
     nome_col   = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
@@ -1878,7 +1881,9 @@ def organograma():
 def api_organograma():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
     try:
-        return jsonify(limpar_nans(calcular_organograma()))
+        mes = request.args.get("mes", type=int)
+        ano = request.args.get("ano", type=int)
+        return jsonify(limpar_nans(calcular_organograma(mes=mes, ano=ano)))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
