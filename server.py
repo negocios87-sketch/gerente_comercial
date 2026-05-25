@@ -2013,16 +2013,6 @@ def calcular_ranking(mes=None, ano=None):
         "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
     }
 
-@app.route("/api/ranking")
-def api_ranking():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        mes = request.args.get("mes", type=int)
-        ano = request.args.get("ano", type=int)
-        return jsonify(limpar_nans(calcular_ranking(mes=mes, ano=ano)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
