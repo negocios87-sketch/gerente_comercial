@@ -890,7 +890,9 @@ function toggleFrDay(gid) {
 function resumoFrRow(label, r, highlight) {
   const bg = highlight ? 'background:#FFF9E6;border-left:3px solid var(--gold);' : 'background:#F0F4FF;border-left:3px solid var(--navy);';
   const color = highlight ? 'color:var(--gold)' : 'color:var(--navy)';
-  const ns = r.no_show != null ? `<span style="color:var(--red)">${N(r.no_show)}</span>` : '—';
+  const ns   = r.no_show != null ? `<span style="color:var(--red)">${N(r.no_show)}</span>` : '—';
+  const gap25Cell = r.gap_25 != null ? `<span style="color:var(--amber);font-weight:700">${N(r.gap_25)}</span>` : '—';
+  const pct25Cell = r.pct_25 != null ? pctBadgeFc(r.pct_25) : '—';
   return `<tr style="${bg}font-weight:700">
     <td style="padding-left:14px;${color};font-size:12px">${label}</td>
     <td class="col-fc" style="background:rgba(13,122,62,.05);color:var(--green)">${N(r.prevista||0)}</td>
@@ -899,7 +901,7 @@ function resumoFrRow(label, r, highlight) {
     <td class="col-fc" style="color:var(--green)">${N(r.realizada||0)}</td>
     <td class="col-fc">${ns}</td>
     <td class="col-fc">${N(r.gap||0)}</td>
-    <td class="col-fc">—</td>
+    <td class="col-fc">${gap25Cell}</td>
   </tr>`;
 }
 
@@ -920,7 +922,7 @@ function renderForecastReunioes(data) {
     html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="background:var(--navy)">
-          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO — Hoje: ${resumo.hoje||''} | Ontem: ${resumo.ontem||''}</th>
+          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO — Hoje: ${resumo.hoje||''} | Último DU: ${resumo.ontem||''}</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Prevista</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. no Dia</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. p/ Outros</th>
@@ -930,8 +932,10 @@ function renderForecastReunioes(data) {
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">GAP 25</th>
         </tr></thead>
         <tbody>
-          ${resumo.time_denise ? resumoFrRow('🔶 Time Denise (Sniper + Elite + Olympus)', resumo.time_denise, true) : ''}
-          ${resumo.geral ? resumoFrRow('🔷 Geral (Todos os times)', resumo.geral, false) : ''}
+          ${resumo.time_denise ? resumoFrRow('🔶 Hoje — Time Denise', resumo.time_denise, true) : ''}
+          ${resumo.geral ? resumoFrRow('🔷 Hoje — Geral', resumo.geral, false) : ''}
+          ${resumo.time_denise_ontem ? resumoFrRow('◀ Último DU — Time Denise', resumo.time_denise_ontem, true) : ''}
+          ${resumo.geral_ontem ? resumoFrRow('◀ Último DU — Geral', resumo.geral_ontem, false) : ''}
         </tbody>
       </table>
     </div>`;
