@@ -1479,33 +1479,30 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
             }
         }
 
-    # GAP 25 = 25 - realizada do DIA — só para Sniper, Elite e Olympus/MGM
+    # GAP 25: meta de 25 reuniões POR EQUIPE por dia
+    # Apenas Sniper, Elite e Olympus/MGM — SDRs individuais ficam com —
     SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm"}
     for sq_name, sq_data in result.items():
         tem_gap25 = norm(sq_name) in SQUADS_GAP25
         for row in sq_data["rows"]:
-            n_sdrs = len(row.get("sdrs", []))
-            meta_dia = 25 * n_sdrs if tem_gap25 else None
+            # SDRs individuais: sempre —
             for sdr in row.get("sdrs", []):
-                if tem_gap25:
-                    sdr["gap_25"] = max(0, 25 - sdr["realizada"])
-                    sdr["pct_25"] = arred(safe_div(sdr["realizada"], 25) * 100)
-                else:
-                    sdr["gap_25"] = None
-                    sdr["pct_25"] = None
+                sdr["gap_25"] = None
+                sdr["pct_25"] = None
+            # Linha do dia: GAP 25 = 25 - realizada do time
             tot_row_real = row.get("realizada", 0)
-            if tem_gap25 and meta_dia:
-                row["gap_25"] = max(0, meta_dia - tot_row_real)
-                row["pct_25"] = arred(safe_div(tot_row_real, meta_dia) * 100)
+            if tem_gap25:
+                row["gap_25"] = max(0, 25 - tot_row_real)
+                row["pct_25"] = arred(safe_div(tot_row_real, 25) * 100)
             else:
                 row["gap_25"] = None
                 row["pct_25"] = None
+        # Total: acumulado vs meta total (25 × número de dias com dados)
         tot = sq_data.get("total", {})
         if tem_gap25:
             tot_real = tot.get("realizada", 0)
-            n_sdrs_total = len({s["uid"] for row in sq_data["rows"] for s in row.get("sdrs",[])})
-            tot["gap_25"] = max(0, 25 * n_sdrs_total - tot_real)
-            tot["pct_25"] = arred(safe_div(tot_real, 25 * n_sdrs_total) * 100) if n_sdrs_total else 0
+            tot["gap_25"] = max(0, 25 - tot_real)
+            tot["pct_25"] = arred(safe_div(tot_real, 25) * 100)
         else:
             tot["gap_25"] = None
             tot["pct_25"] = None
@@ -1515,25 +1512,41 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
     DENISE_FR   = {"sniper", "elite", "olympus", "mgm"}
     GERAL_FR    = {"sniper", "elite", "olympus", "mgm", "latam", "orion"}
 
-    def resumo_reunioes_hoje(squad_names):
+    def resumo_reunioes_hoje(squad_names, dia_str):
         r = {"prevista": 0, "ag_no_dia": 0, "ag_p_outros": 0,
-             "realizada": 0, "no_show": None, "gap": 0}
-        has_past = False
+             "realizada": 0, "no_show": None, "gap": 0,
+             "gap_25": None, "pct_25": None}
+        # GAP 25 consolidado Denise = 75 (3 equipes × 25)
+        DENISE_SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm"}
+        meta_25 = 0
         for sq_name, sq_data in result.items():
             if norm(sq_name) not in squad_names: continue
+            if norm(sq_name) in DENISE_SQUADS_GAP25:
+                meta_25 += 25
             for row in sq_data.get("rows", []):
-                if row["dia"] == hoje_str_fr:
+                if row["dia"] == dia_str:
                     for k in ["prevista","ag_no_dia","ag_p_outros","realizada","gap"]:
                         r[k] = r.get(k,0) + row.get(k, 0)
                     if row.get("no_show") is not None:
-                        has_past = True
                         r["no_show"] = (r["no_show"] or 0) + row["no_show"]
+        if meta_25 > 0:
+            r["gap_25"] = max(0, meta_25 - r["realizada"])
+            r["pct_25"] = arred(safe_div(r["realizada"], meta_25) * 100)
         return {k: v for k, v in r.items()}
 
+    # Último dia útil antes de hoje
+    ultimo_du_fr = hoje - timedelta(days=1)
+    while ultimo_du_fr.weekday() >= 5 or ultimo_du_fr in feriados:
+        ultimo_du_fr -= timedelta(days=1)
+    ultimo_du_str = ultimo_du_fr.strftime("%Y-%m-%d")
+
     resumo_fr = {
-        "time_denise": resumo_reunioes_hoje(DENISE_FR),
-        "geral":       resumo_reunioes_hoje(GERAL_FR),
-        "hoje":        hoje_str_fr,
+        "time_denise":       resumo_reunioes_hoje(DENISE_FR, hoje_str_fr),
+        "geral":             resumo_reunioes_hoje(GERAL_FR,  hoje_str_fr),
+        "time_denise_ontem": resumo_reunioes_hoje(DENISE_FR, ultimo_du_str),
+        "geral_ontem":       resumo_reunioes_hoje(GERAL_FR,  ultimo_du_str),
+        "hoje":              hoje_str_fr,
+        "ontem":             ultimo_du_str,
     }
 
     return {
@@ -1884,6 +1897,129 @@ def api_organograma():
         mes = request.args.get("mes", type=int)
         ano = request.args.get("ano", type=int)
         return jsonify(limpar_nans(calcular_organograma(mes=mes, ano=ano)))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── RANKING ───────────────────────────────────────────────────
+
+def calcular_ranking(mes=None, ano=None):
+    hoje = date.today()
+    mes  = mes or hoje.month
+    ano  = ano or hoje.year
+
+    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
+    metas      = buscar_metas_todas(ano, mes)
+    users_pipe = buscar_users_pipe()
+    qual_ids   = buscar_qual_ids()
+    deals      = buscar_deals_mes(mes, ano)
+    activities = buscar_activities_mes(mes, ano)
+    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
+
+    feriados = buscar_feriados()
+    du_calc  = du_mes_total(ano, mes, feriados)
+    du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
+    du_total = du_sheet if du_sheet > 0 else du_calc
+
+    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+    nome_to_subarea  = {}
+    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
+    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
+    for _, row in colab_df.iterrows():
+        nn  = norm(str(row.get(nome_col, "")))
+        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+        nome_to_subarea[nn] = sub
+
+    if (ano > 2026) or (ano == 2026 and mes >= 5):
+        PESO_REU = 0.70; PESO_FIN = 0.30
+    else:
+        PESO_REU = 0.50; PESO_FIN = 0.50
+
+    closer_real = {}
+    for deal in deals:
+        owner_nn = norm(get_owner_name(deal))
+        if not owner_nn:
+            oid = get_owner_id(deal)
+            owner_nn = uid_to_nome_norm.get(oid, "")
+        if not owner_nn: continue
+        valor = float(deal.get("value") or 0)
+        if owner_nn not in closer_real:
+            closer_real[owner_nn] = {"valor": 0, "qtd": 0}
+        closer_real[owner_nn]["valor"] += valor
+        closer_real[owner_nn]["qtd"]   += 1
+
+    acts_by_owner = {}
+    for act in activities:
+        oid = str(act.get("owner_id", ""))
+        acts_by_owner.setdefault(oid, []).append(act)
+
+    def act_valida(act):
+        if not (act.get("done") is True or act.get("status") == "done"): return False
+        deal_id   = act.get("deal_id")
+        act_owner = str(act.get("owner_id", ""))
+        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
+        if act_owner and deal_owner and act_owner == deal_owner: return False
+        if deal_id and deal_id not in deal_ids_validos: return False
+        return True
+
+    closers_list = []
+    sdrs_list    = []
+    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
+    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
+
+    for m in closers_metas:
+        nn  = m["nome_norm"]
+        sub = nome_to_subarea.get(nn, "")
+        if not sub: continue
+        ri   = closer_real.get(nn, {"valor": 0, "qtd": 0})
+        meta = m["meta_fin"]
+        real = ri["valor"]
+        pct  = arred(safe_div(real, meta) * 100) if meta else 0
+        closers_list.append({
+            "nome": m["nome"], "time": display_squad(sub),
+            "meta": arred(meta), "realizado": arred(real),
+            "pct_atingido": pct,
+        })
+
+    for m in sdrs_metas:
+        nn  = m["nome_norm"]
+        sub = nome_to_subarea.get(nn, "")
+        if not sub: continue
+        meta_reu = m["meta_reu"] / 10
+        meta_fin = m["meta_fin"]
+        uid      = nome_norm_to_uid.get(nn)
+        uid_str  = str(uid) if uid else ""
+        acts_sdr = acts_by_owner.get(uid_str, [])
+        validadas   = len([a for a in acts_sdr if act_valida(a)])
+        qual_id     = qual_ids.get(nn)
+        deals_sdr   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
+        valor_ganho = sum(float(d.get("value") or 0) for d in deals_sdr)
+        pct_reu  = arred(safe_div(validadas, meta_reu) * 100) if meta_reu else 0
+        pct_fin  = arred(safe_div(valor_ganho, meta_fin) * 100) if meta_fin else 0
+        pct_final = arred(pct_reu * PESO_REU + pct_fin * PESO_FIN)
+        sdrs_list.append({
+            "nome": m["nome"], "time": display_squad(sub),
+            "meta_reu": arred(meta_reu), "realizado_reu": validadas,
+            "meta_fin": arred(meta_fin), "realizado_fin": arred(valor_ganho),
+            "pct_reu": pct_reu, "pct_fin": pct_fin, "pct_final": pct_final,
+        })
+
+    times = sorted(set([c["time"] for c in closers_list] + [s["time"] for s in sdrs_list]))
+    return {
+        "closers": closers_list, "sdrs": sdrs_list, "times": times,
+        "mes": mes, "ano": ano,
+        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+    }
+
+@app.route("/api/ranking")
+def api_ranking():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        mes = request.args.get("mes", type=int)
+        ano = request.args.get("ano", type=int)
+        return jsonify(limpar_nans(calcular_ranking(mes=mes, ano=ano)))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
