@@ -52,6 +52,22 @@
           "expected_close_date_original": "2026-05-25"
         }
       ],
+      "Natália Ferreira": [
+        {
+          "id": 276757,
+          "titulo": "Enrique Ferreira",
+          "valor": 27000.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-25"
+        },
+        {
+          "id": 368090,
+          "titulo": "ANDERSON LUIZ DIANOSKI",
+          "valor": 18990.0,
+          "probabilidade": 50,
+          "expected_close_date_original": "2026-05-25"
+        }
+      ],
       "Fabio Perim": [
         {
           "id": 345328,
@@ -67,15 +83,6 @@
           "titulo": "Mônica Paes",
           "valor": 17990.0,
           "probabilidade": 20,
-          "expected_close_date_original": "2026-05-25"
-        }
-      ],
-      "Natália Ferreira": [
-        {
-          "id": 368090,
-          "titulo": "ANDERSON LUIZ DIANOSKI",
-          "valor": 18990.0,
-          "probabilidade": 50,
           "expected_close_date_original": "2026-05-25"
         }
       ]
