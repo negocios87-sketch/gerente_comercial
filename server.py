@@ -1263,6 +1263,7 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
     ano  = ano or hoje.year
     hoje_str = hoje.strftime("%Y-%m-%d")
 
+    feriados   = buscar_feriados()
     colab_df   = buscar_colaboradores(mes=mes, ano=ano)
     metas      = buscar_metas_todas(ano, mes)
     users_pipe = buscar_users_pipe()
