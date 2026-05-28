@@ -35,6 +35,9 @@ URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadshe
 
 # Squads que usam criador da atividade em vez do responsável
 SQUADS_CRIADOR   = {"zenite"}
+DENISE_NORM      = "denise mussolin"   # nome normalizado da Denise
+# Mapeamento funil → squad display (para distribuir vendas da Denise)
+FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus"}
 EXCLUIR_REU_CLOSER = {"matheus paz"}  # responsavel ignorado nas reunioes de closer
 SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
 
@@ -202,6 +205,23 @@ def buscar_users_pipe():
     resp = req.get(f"{BASE_V1}/users", params={"api_token": API_KEY}, timeout=15)
     resp.raise_for_status()
     return {u["id"]: u["name"] for u in (resp.json().get("data") or [])}
+
+def buscar_pipelines():
+    """Retorna mapa pipeline_id -> nome normalizado do funil."""
+    resp = req.get(f"{BASE_V1}/pipelines", params={"api_token": API_KEY}, timeout=15)
+    resp.raise_for_status()
+    return {p["id"]: norm(p["name"]) for p in (resp.json().get("data") or [])}
+
+def squad_por_funil(deal, pipes):
+    """Se o deal for da Denise, retorna o squad pelo funil. Senão None."""
+    owner_nn = norm(get_owner_name(deal))
+    if not owner_nn:
+        return None
+    if owner_nn != DENISE_NORM:
+        return None
+    pipe_id   = deal.get("pipeline_id")
+    pipe_norm = pipes.get(pipe_id, "")
+    return FUNIL_SQUAD_MAP.get(pipe_norm)
 
 def buscar_qual_ids():
     resp = req.get(f"{BASE_V1}/dealFields", params={"api_token": API_KEY}, timeout=15)
@@ -401,6 +421,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     deals      = buscar_deals_mes(mes, ano)
     activities = buscar_activities_mes(mes, ano)
     referidos  = buscar_referidos_mes(mes, ano)
+    pipes      = buscar_pipelines()
 
     sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
     nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
@@ -442,7 +463,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     def visivel(sub):
         return squads_visiveis is None or norm(sub) in squads_visiveis
 
-    closer_real = {}
+    closer_real = {}        # nn -> {valor, valor_multi, qtd}
+    denise_por_squad = {}  # squad_display -> {valor, valor_multi, qtd}
     for deal in deals:
         owner_nome = norm(get_owner_name(deal))
         if not owner_nome:
@@ -451,11 +473,20 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if not owner_nome: continue
         valor       = float(deal.get("value") or 0)
         valor_multi = float(cf(deal, CF_MULTIPLICADOR) or 0)
-        if owner_nome not in closer_real:
-            closer_real[owner_nome] = {"valor": 0, "valor_multi": 0, "qtd": 0}
-        closer_real[owner_nome]["valor"]       += valor
-        closer_real[owner_nome]["valor_multi"] += valor_multi
-        closer_real[owner_nome]["qtd"]         += 1
+        # Denise: distribui pelo funil
+        squad_funil = squad_por_funil(deal, pipes)
+        if squad_funil:
+            if squad_funil not in denise_por_squad:
+                denise_por_squad[squad_funil] = {"valor": 0, "valor_multi": 0, "qtd": 0}
+            denise_por_squad[squad_funil]["valor"]       += valor
+            denise_por_squad[squad_funil]["valor_multi"] += valor_multi
+            denise_por_squad[squad_funil]["qtd"]         += 1
+        else:
+            if owner_nome not in closer_real:
+                closer_real[owner_nome] = {"valor": 0, "valor_multi": 0, "qtd": 0}
+            closer_real[owner_nome]["valor"]       += valor
+            closer_real[owner_nome]["valor_multi"] += valor_multi
+            closer_real[owner_nome]["qtd"]         += 1
 
     deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
     for d in deals:
@@ -716,6 +747,17 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             lic_sdrs.extend(sq["sdrs_ind"])
         else:
             squads_final[sub] = sq
+
+    # Injeta vendas da Denise em cada squad pelo funil
+    for sub, sq in squads_final.items():
+        sub_display = display_squad(sub)
+        di = denise_por_squad.get(sub_display)
+        if not di: continue
+        # Adiciona como entrada virtual no closer_real para que total_closers some corretamente
+        # Cria linha virtual da Denise nesse squad
+        sq["closers_ind"].append(
+            build_closer_row("Denise Mussolin*", 0, di["valor"], di["valor_multi"], di["qtd"], is_head=True)
+        )
     # Licenciados removidos de todas as abas conforme solicitado
     # if lic_closers or lic_sdrs:
     #     squads_final["Licenciados"] = {"nome": "Licenciados", ...}
@@ -961,6 +1003,23 @@ def buscar_deals_forecast():
         if not cursor or not lote: break
     return todos
 
+def buscar_deals_ganhos_todos():
+    """Busca todos os deals ganhos pelo FILTER_DEALS para o Realizado do Forecast."""
+    todos, start = [], 0
+    while True:
+        resp = req.get(f"{BASE_V1}/deals", params={
+            "filter_id": FILTER_DEALS, "status": "won",
+            "limit": 500, "start": start, "api_token": API_KEY,
+        }, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        lote = data.get("data") or []
+        todos.extend(lote)
+        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
+        if not mais or not lote: break
+        start += 500
+    return todos
+
 def calcular_forecast(head_filter=None):
     from collections import defaultdict
     hoje_fc = date.today()
@@ -984,6 +1043,32 @@ def calcular_forecast(head_filter=None):
     else:
         squads_visiveis = None
     deals = buscar_deals_forecast()
+    # Realizado: usa FILTER_DEALS (todas as vendas, qualquer etapa)
+    deals_ganhos_reais = buscar_deals_ganhos_todos()
+    pipes_fc      = buscar_pipelines()
+    users_pipe_fc = buscar_users_pipe()
+    uid_to_norm_fc = {uid: norm(name) for uid, name in users_pipe_fc.items()}
+
+    # realizado_map: sub_display -> won_date -> owner_name -> valor
+    realizado_map = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    for deal in deals_ganhos_reais:
+        wt = won_time_br(deal)[:10]
+        if not wt: continue
+        owner_nn = norm(get_owner_name(deal))
+        if not owner_nn:
+            oid = get_owner_id(deal)
+            owner_nn = uid_to_norm_fc.get(oid, "")
+        if not owner_nn: continue
+        squad_funil_fc = squad_por_funil(deal, pipes_fc)
+        if squad_funil_fc:
+            sub_key = squad_funil_fc
+        else:
+            sub = nome_to_subarea.get(owner_nn, "")
+            if not sub: continue
+            sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
+        if squads_visiveis and norm(sub_key) not in {norm(s) for s in squads_visiveis}: pass
+        realizado_map[sub_key][wt][get_owner_name(deal)] += float(deal.get("value") or 0)
+
     by_squad = defaultdict(lambda: defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0,"closers":defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0})}))
     for deal in deals:
         status = deal.get("status")
@@ -994,21 +1079,28 @@ def calcular_forecast(head_filter=None):
         subarea = nome_to_subarea.get(owner_nn, "")
         if not subarea: continue
         if squads_visiveis and norm(subarea) not in squads_visiveis: continue
-        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
+        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else display_squad(subarea)
         value = float(deal.get("value") or 0)
         probability = deal.get("probability")
         d = by_squad[sub_display][date_fc]
         c = d["closers"][owner]
         if "deals" not in c: c["deals"] = []
         c["deals"].append({"id": deal.get("id"), "titulo": deal.get("title",""), "valor": arred(value), "probabilidade": probability, "status": status})
-        if status == "won":
-            d["realizado"] += value; c["realizado"] += value
-        elif status == "lost":
+        if status == "lost":
             d["perda"] += value; c["perda"] += value
-        else:
+        elif status != "won":
             if probability == 20: d["p20"] += value; c["p20"] += value
             elif probability == 50: d["p50"] += value; c["p50"] += value
             elif probability == 70: d["p70"] += value; c["p70"] += value
+
+    # Injeta realizado real em cada squad/dia/closer
+    for sub_key, dias in realizado_map.items():
+        for dt, closers_r in dias.items():
+            for owner_name, valor in closers_r.items():
+                d = by_squad[sub_key][dt]
+                c = d["closers"][owner_name]
+                d["realizado"] += valor
+                c["realizado"] += valor
     result = {}
     for squad, days in by_squad.items():
         rows = []
@@ -1636,11 +1728,17 @@ def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
     users_pipe_ov  = buscar_users_pipe()
     uid_to_norm_ov = {uid: norm(name) for uid, name in users_pipe_ov.items()}
 
-    deals = buscar_deals_mes(mes, ano)
+    deals      = buscar_deals_mes(mes, ano)
+    pipes_ov   = buscar_pipelines()
     ganhos_dia = defaultdict(lambda: defaultdict(float))
     for deal in deals:
         wt = won_time_br(deal)[:10]
         if not wt: continue
+        # Denise: usa funil para determinar squad
+        squad_funil_ov = squad_por_funil(deal, pipes_ov)
+        if squad_funil_ov:
+            ganhos_dia[squad_funil_ov][wt] += float(deal.get("value") or 0)
+            continue
         owner_nn = norm(get_owner_name(deal))
         if not owner_nn:
             oid = get_owner_id(deal)
@@ -1648,7 +1746,6 @@ def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
         if not owner_nn: continue
         sub = nome_to_subarea.get(owner_nn, "")
         if not sub: continue
-        # Aplica display_squad para garantir mesma chave que meta_por_squad
         if sub.upper().startswith("LIC"):
             sub_key = "Licenciados"
         else:
