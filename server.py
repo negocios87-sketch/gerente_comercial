@@ -1003,20 +1003,31 @@ def buscar_deals_forecast():
         if not cursor or not lote: break
     return todos
 
-def buscar_deals_ganhos_todos():
-    """Busca todos os deals ganhos pelo FILTER_DEALS para o Realizado do Forecast."""
+def buscar_deals_ganhos_todos(mes=None, ano=None):
+    """Busca deals ganhos pelo FILTER_DEALS filtrando pelo mês (won_time UTC-3)."""
+    hoje = date.today()
+    mes  = mes or hoje.month
+    ano  = ano or hoje.year
+    mes_str = f"{ano}-{mes:02d}"
     todos, start = [], 0
     while True:
         resp = req.get(f"{BASE_V1}/deals", params={
             "filter_id": FILTER_DEALS, "status": "won",
+            "sort": "won_time DESC",
             "limit": 500, "start": start, "api_token": API_KEY,
         }, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         lote = data.get("data") or []
-        todos.extend(lote)
+        found_older = False
+        for deal in lote:
+            wt_br = won_time_br(deal)[:7]
+            if wt_br == mes_str:
+                todos.append(deal)
+            elif wt_br < mes_str:
+                found_older = True
         mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote: break
+        if not mais or not lote or found_older: break
         start += 500
     return todos
 
@@ -1044,7 +1055,7 @@ def calcular_forecast(head_filter=None):
         squads_visiveis = None
     deals = buscar_deals_forecast()
     # Realizado: usa FILTER_DEALS (todas as vendas, qualquer etapa)
-    deals_ganhos_reais = buscar_deals_ganhos_todos()
+    deals_ganhos_reais = buscar_deals_ganhos_todos(mes=hoje_fc.month, ano=hoje_fc.year)
     pipes_fc      = buscar_pipelines()
     users_pipe_fc = buscar_users_pipe()
     uid_to_norm_fc = {uid: norm(name) for uid, name in users_pipe_fc.items()}
