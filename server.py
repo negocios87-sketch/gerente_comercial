@@ -1060,6 +1060,16 @@ def calcular_forecast(head_filter=None):
     users_pipe_fc = buscar_users_pipe()
     uid_to_norm_fc = {uid: norm(name) for uid, name in users_pipe_fc.items()}
 
+    # Helper: verifica se sub_key (display name) é visível para o usuário
+    # Necessário porque squads_visiveis tem nomes raw (ex: "mgm") mas
+    # realizado_map tem display names (ex: "Olympus")
+    def squad_visivel_expanded(sub_key):
+        if not squads_visiveis: return True
+        if norm(sub_key) in {norm(s) for s in squads_visiveis}: return True
+        for sv in squads_visiveis:
+            if norm(display_squad(sv)) == norm(sub_key): return True
+        return False
+
     # realizado_map: sub_display -> won_date -> owner_name -> valor
     realizado_map = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
     for deal in deals_ganhos_reais:
@@ -1107,15 +1117,6 @@ def calcular_forecast(head_filter=None):
     # Injeta realizado real em cada squad/dia/closer (respeitando squads_visiveis)
     # squads_visiveis tem nomes raw (ex: "mgm"), realizado_map tem display names (ex: "Olympus")
     # Monta set expandido incluindo aliases
-    def squad_visivel_expanded(sub_key):
-        if not squads_visiveis: return True
-        if norm(sub_key) in {norm(s) for s in squads_visiveis}: return True
-        # Verifica se algum squad visível mapeia para esse display name
-        for sv in squads_visiveis:
-            if display_squad(sv) == sub_key: return True
-            if norm(display_squad(sv)) == norm(sub_key): return True
-        return False
-
     for sub_key, dias in realizado_map.items():
         if not squad_visivel_expanded(sub_key): continue
         for dt, closers_r in dias.items():
