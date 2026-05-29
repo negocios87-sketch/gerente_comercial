@@ -37,7 +37,7 @@ URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadshe
 SQUADS_CRIADOR   = {"zenite"}
 DENISE_NORM      = "denise mussolin"   # nome normalizado da Denise
 # Mapeamento funil → squad display (para distribuir vendas da Denise)
-FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus"}
+FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus", "navigator": "Olympus"}
 EXCLUIR_REU_CLOSER = {"matheus paz"}  # responsavel ignorado nas reunioes de closer
 SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
 
@@ -1077,8 +1077,8 @@ def calcular_forecast(head_filter=None):
             sub = nome_to_subarea.get(owner_nn, "")
             if not sub: continue
             sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
-        if squads_visiveis and norm(sub_key) not in {norm(s) for s in squads_visiveis}: pass
-        realizado_map[sub_key][wt][get_owner_name(deal)] += float(deal.get("value") or 0)
+        if squads_visiveis and norm(sub_key) not in {norm(s) for s in squads_visiveis}: continue
+        realizado_map[sub_key][wt][get_owner_name(deal) or owner_nn] += float(deal.get("value") or 0)
 
     by_squad = defaultdict(lambda: defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0,"closers":defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0})}))
     for deal in deals:
@@ -1104,8 +1104,9 @@ def calcular_forecast(head_filter=None):
             elif probability == 50: d["p50"] += value; c["p50"] += value
             elif probability == 70: d["p70"] += value; c["p70"] += value
 
-    # Injeta realizado real em cada squad/dia/closer
+    # Injeta realizado real em cada squad/dia/closer (respeitando squads_visiveis)
     for sub_key, dias in realizado_map.items():
+        if squads_visiveis and norm(sub_key) not in {norm(s) for s in squads_visiveis}: continue
         for dt, closers_r in dias.items():
             for owner_name, valor in closers_r.items():
                 d = by_squad[sub_key][dt]
@@ -1153,11 +1154,22 @@ def calcular_forecast(head_filter=None):
         r["realizado"] = arred(realizado)
         return {k: arred(v) for k, v in r.items()}
 
+    def resumo_mes(squad_names):
+        r = {"p20": 0.0, "p50": 0.0, "p70": 0.0, "media": 0.0,
+             "em_aberto": 0.0, "realizado": 0.0, "perda": 0.0}
+        for sq_name, sq_data in result.items():
+            if norm(sq_name) not in squad_names: continue
+            for row in sq_data.get("rows", []):
+                for k in r: r[k] = r.get(k, 0) + row.get(k, 0)
+        return {k: arred(v) for k, v in r.items()}
+
     resumo_fc = {
-        "time_denise": resumo_dia(DENISE_FC, hoje_str_fc),
-        "geral":       resumo_dia(GERAL_FC,  hoje_str_fc),
+        "time_denise":       resumo_dia(DENISE_FC, hoje_str_fc),
+        "geral":             resumo_dia(GERAL_FC,  hoje_str_fc),
         "time_denise_ontem": resumo_dia(DENISE_FC, ontem_str_fc),
         "geral_ontem":       resumo_dia(GERAL_FC,  ontem_str_fc),
+        "time_denise_mes":   resumo_mes(DENISE_FC),
+        "geral_mes":         resumo_mes(GERAL_FC),
         "hoje":  hoje_str_fc,
         "ontem": ontem_str_fc,
     }
@@ -1336,7 +1348,10 @@ def api_snapshot_sobrepor():
 
 @app.route("/api/historico")
 def api_historico():
-    if "nome" not in session or not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    nome_sess = session["nome"]
+    is_denise_h = norm(nome_sess) == "denise mussolin"
+    if not is_master(nome_sess) and not is_denise_h: return jsonify({"erro": "Acesso negado"}), 403
     try:
         import json
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/snapshots"
