@@ -1105,8 +1105,19 @@ def calcular_forecast(head_filter=None):
             elif probability == 70: d["p70"] += value; c["p70"] += value
 
     # Injeta realizado real em cada squad/dia/closer (respeitando squads_visiveis)
+    # squads_visiveis tem nomes raw (ex: "mgm"), realizado_map tem display names (ex: "Olympus")
+    # Monta set expandido incluindo aliases
+    def squad_visivel_expanded(sub_key):
+        if not squads_visiveis: return True
+        if norm(sub_key) in {norm(s) for s in squads_visiveis}: return True
+        # Verifica se algum squad visível mapeia para esse display name
+        for sv in squads_visiveis:
+            if display_squad(sv) == sub_key: return True
+            if norm(display_squad(sv)) == norm(sub_key): return True
+        return False
+
     for sub_key, dias in realizado_map.items():
-        if squads_visiveis and norm(sub_key) not in {norm(s) for s in squads_visiveis}: continue
+        if not squad_visivel_expanded(sub_key): continue
         for dt, closers_r in dias.items():
             for owner_name, valor in closers_r.items():
                 d = by_squad[sub_key][dt]
