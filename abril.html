@@ -613,6 +613,8 @@ function renderForecast(data) {
           ${resumo.geral ? resumoFcRow('🔷 Hoje — Geral', resumo.geral, false) : ''}
           ${resumo.time_denise_ontem ? resumoFcRow('◀ Ontem — Time Denise', resumo.time_denise_ontem, true) : ''}
           ${resumo.geral_ontem ? resumoFcRow('◀ Ontem — Geral', resumo.geral_ontem, false) : ''}
+          ${resumo.time_denise_mes ? resumoFcRow('📅 Mês — Time Denise', resumo.time_denise_mes, true) : ''}
+          ${resumo.geral_mes ? resumoFcRow('📅 Mês — Geral', resumo.geral_mes, false) : ''}
         </tbody>
       </table>
     </div>`;
@@ -749,6 +751,7 @@ document.head.appendChild(fcStyle);
 
 // ── SNAPSHOT / HISTÓRICO ─────────────────────────────────────
 const IS_MASTER = {{ "true" if is_master else "false" }};
+const IS_DENISE = {{ "true" if nome|lower == "denise mussolin" else "false" }};
 
 async function salvarSnapshot(force=false) {
   const url = force ? '/api/snapshot/sobrepor' : '/api/snapshot';
@@ -1635,7 +1638,7 @@ async function fetchOrganograma() {
 
 // Init
 const hoje = new Date();
-if (IS_MASTER) {
+if (IS_MASTER || IS_DENISE) {
   document.getElementById('tab-historico').style.display = '';
 }
 // Overview disponível para todos
