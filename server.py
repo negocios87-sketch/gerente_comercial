@@ -1077,7 +1077,7 @@ def calcular_forecast(head_filter=None):
             sub = nome_to_subarea.get(owner_nn, "")
             if not sub: continue
             sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
-        if squads_visiveis and norm(sub_key) not in {norm(s) for s in squads_visiveis}: continue
+        if not squad_visivel_expanded(sub_key): continue
         realizado_map[sub_key][wt][get_owner_name(deal) or owner_nn] += float(deal.get("value") or 0)
 
     by_squad = defaultdict(lambda: defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0,"closers":defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0})}))
