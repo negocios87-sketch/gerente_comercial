@@ -634,7 +634,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         nn  = m["nome_norm"]
         sub = nome_to_subarea.get(nn, "")
         if not sub or not visivel(sub): continue
-        meta_reu = m["meta_reu"] / 10
+        meta_reu = m["meta_reu"]
         meta_fin = m["meta_fin"]
         uid      = nome_norm_to_uid.get(nn)
         uid_str  = str(uid) if uid else ""
@@ -2123,7 +2123,7 @@ def calcular_ranking(mes=None, ano=None):
         nn  = m["nome_norm"]
         sub = nome_to_subarea.get(nn, "")
         if not sub: continue
-        meta_reu = m["meta_reu"] / 10
+        meta_reu = m["meta_reu"]
         meta_fin = m["meta_fin"]
         uid      = nome_norm_to_uid.get(nn)
         uid_str  = str(uid) if uid else ""
