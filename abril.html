@@ -592,155 +592,26 @@ function renderForecast(data) {
   const COLS = ['Dia','20%','50%','70%','Média Prev.','Em Aberto','Realizado','Perda','Total Prev.','% Ating.'];
 
   let html = '';
-  // Linhas de resumo do dia de hoje
-  if (resumo.time_denise || resumo.geral) {
-    html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:var(--navy)">
-          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO — Hoje: ${resumo.hoje||''} | Ontem: ${resumo.ontem||''}</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">20%</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">50%</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">70%</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Média Prev.</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Em Aberto</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Realizado</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Perda</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Total Prev.</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">% Ating.</th>
-        </tr></thead>
-        <tbody>
-          ${resumo.time_denise ? resumoFcRow('🔶 Hoje — Time Denise', resumo.time_denise, true) : ''}
-          ${resumo.geral ? resumoFcRow('🔷 Hoje — Geral', resumo.geral, false) : ''}
-          ${resumo.time_denise_ontem ? resumoFcRow('◀ Ontem — Time Denise', resumo.time_denise_ontem, true) : ''}
-          ${resumo.geral_ontem ? resumoFcRow('◀ Ontem — Geral', resumo.geral_ontem, false) : ''}
-          ${resumo.time_denise_prox ? resumoFcRow('▶ Próx. Dia Útil — Time Denise', resumo.time_denise_prox, true) : ''}
-          ${resumo.geral_prox ? resumoFcRow('▶ Próx. Dia Útil — Geral', resumo.geral_prox, false) : ''}
-          ${resumo.time_denise_mes ? resumoFcRow('📅 Mês — Time Denise', resumo.time_denise_mes, true) : ''}
-          ${resumo.geral_mes ? resumoFcRow('📅 Mês — Geral', resumo.geral_mes, false) : ''}
-        </tbody>
-      </table>
-    </div>`;
-  }
-  Object.entries(squads).forEach(([squad, sq]) => {
-    const rows = sq.rows || [];
-    const tot  = sq.total || {};
-    let tbody = '';
+  // Período padrão = mês atual
+  const _hoje = new Date();
+  const _iniDefault = new Date(_hoje.getFullYear(), _hoje.getMonth(), 1).toISOString().slice(0,10);
+  const _fimDefault = _hoje.toISOString().slice(0,10);
 
-    rows.forEach((row, i) => {
-      const gid = `fc_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
-      // Day group row
-      const todayStr = new Date().toISOString().slice(0,10);
-      const isPast    = row.dia < todayStr;
-      const isToday   = row.dia === todayStr;
-      const diaLabel  = row.dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
-      const pctCell   = row.atingimento != null
-        ? (isPast
-            ? `<span class="pct-badge pct-${row.atingimento>=100?'green':row.atingimento>=60?'amber':'red'} fc-past">${row.atingimento.toFixed(1)}%</span>`
-            : pctBadgeFc(row.atingimento))
-        : '—';
-      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${isToday ? 'background:#FFFBEB !important;border-left:3px solid var(--gold);' : ''}">
-        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
-        <td class="col-fc">${R(row.p20)}</td>
-        <td class="col-fc">${R(row.p50)}</td>
-        <td class="col-fc">${R(row.p70)}</td>
-        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(row.media)}</td>
-        <td class="col-fc fc-gray">${R(row.em_aberto)}</td>
-        <td class="col-fc fc-gray" style="color:${row.realizado>0?'var(--green)':'var(--text-muted)'} !important">${R(row.realizado)}</td>
-        <td class="col-fc fc-gray" style="color:${row.perda>0?'var(--red)':'var(--text-muted)'} !important">${R(row.perda)}</td>
-        <td class="col-fc fc-total-bold">${R(row.total_previsto)}</td>
-        <td class="col-fc">${pctCell}</td>
-      </tr>`;
-
-      // Closer member rows (hidden by default)
-      (row.closers || []).forEach((c, ci) => {
-        const cgid = `${gid}_c${ci}`;
-        const hasDeals = c.deals && c.deals.length > 0;
-        tbody += `<tr class="row-member${hasDeals ? ' row-group' : ''}" data-fc-mid="${gid}" ${hasDeals ? `data-fc-cgid="${cgid}" onclick="toggleFcCloser('${cgid}')"` : ''} style="display:none">
-          <td style="padding-left:${hasDeals ? '28px' : '36px'}">
-            <div class="name-cell">${avatarHtml(c.nome)}<span style="color:var(--text-muted);font-size:11px">${c.nome}</span></div>
-          </td>
-          <td class="col-fc" style="font-size:11px">${R(c.p20)}</td>
-          <td class="col-fc" style="font-size:11px">${R(c.p50)}</td>
-          <td class="col-fc" style="font-size:11px">${R(c.p70)}</td>
-          <td class="col-fc val-real" style="font-size:11px">${R(c.media)}</td>
-          <td class="col-fc" style="font-size:11px">${R(c.em_aberto)}</td>
-          <td class="col-fc" style="font-size:11px;color:${c.realizado>0?'var(--green)':'var(--text-muted)'}">${R(c.realizado)}</td>
-          <td class="col-fc" style="font-size:11px;color:${c.perda>0?'var(--red)':'var(--text-muted)'}">${R(c.perda)}</td>
-          <td class="col-fc" style="font-size:11px">${R(c.total_previsto)}</td>
-          <td class="col-fc" style="font-size:11px">${pctBadgeFc(c.atingimento)}</td>
-        </tr>`;
-        // Deal rows (hidden by default)
-        (c.deals || []).forEach(deal => {
-          const statusColor = deal.status === 'won' ? 'var(--green)' : deal.status === 'lost' ? 'var(--red)' : 'var(--text-muted)';
-          const statusLabel = deal.status === 'won' ? 'Ganho' : deal.status === 'lost' ? 'Perdido' : 'Aberto';
-          tbody += `<tr data-fc-cmid="${cgid}" style="display:none;background:#FAFBFE">
-            <td style="padding-left:52px;font-size:11px;font-weight:400;color:var(--text-muted)">
-              <a href="https://boardacademy.pipedrive.com/deal/${deal.id}" target="_blank" style="color:var(--gold);font-size:10px;margin-right:6px;text-decoration:none">#${deal.id}</a>${deal.titulo}
-            </td>
-            <td class="col-fc" style="font-size:10px;color:var(--text-muted)">${deal.probabilidade ? deal.probabilidade + '%' : '—'}</td>
-            <td class="col-fc" colspan="2" style="font-size:10px;color:${statusColor};font-weight:600">${statusLabel}</td>
-            <td class="col-fc" colspan="2"></td>
-            <td class="col-fc" style="font-size:11px;color:${statusColor};font-weight:600">${R(deal.valor)}</td>
-            <td class="col-fc" colspan="3"></td>
-          </tr>`;
-        });
-      });
-    });
-
-    // Total row
-    tbody += `<tr class="row-total">
-      <td>TOTAL</td>
-      <td>${R(tot.p20)}</td><td>${R(tot.p50)}</td><td>${R(tot.p70)}</td>
-      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${R(tot.media)}</td>
-      <td style="color:var(--text-muted)">${R(tot.em_aberto)}</td>
-      <td style="color:${tot.realizado>0?'var(--green)':'var(--text-muted)'}">${R(tot.realizado)}</td>
-      <td style="color:${tot.perda>0?'var(--red)':'var(--text-muted)'}">${R(tot.perda)}</td>
-      <td style="font-weight:700;color:var(--navy)">${R(tot.total_previsto)}</td>
-      <td>${pctBadgeFc(tot.atingimento)}</td>
-    </tr>`;
-
-    html += `
-    <div class="squad-block">
-      <div class="squad-header">
-        <div class="squad-title">${squad}</div>
-        <div class="squad-divider"></div>
-      </div>
-      <div class="card">
-        <div class="table-scroll">
-          <table>
-            <thead><tr>
-              <th style="text-align:left;min-width:110px">Dia</th>
-              <th>20%</th><th>50%</th><th>70%</th>
-              <th style="background:rgba(13,122,62,.15)">Média Prev.</th>
-              <th style="color:#9CA3AF">Em Aberto</th>
-              <th style="color:#9CA3AF">Realizado</th>
-              <th style="color:#9CA3AF">Perda</th>
-              <th style="color:#9CA3AF">Total Prev.</th>
-              <th>% Ating.</th>
-            </tr></thead>
-            <tbody>${tbody}</tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
-  });
-
-  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
-  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
-
-  // Date picker bloco de período
-  const hoje_iso = new Date().toISOString().slice(0,10);
-  html += `<div style="margin-top:24px;background:var(--white);border:1px solid var(--border);border-radius:10px;padding:16px 20px">
-    <div style="font-size:10px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">📊 Resumo por Período</div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <label style="font-size:11px;color:var(--text-muted)">De:</label>
-      <input type="date" id="periodo-ini" value="${hoje_iso}" style="border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-size:12px;color:var(--text);background:var(--white)">
-      <label style="font-size:11px;color:var(--text-muted)">Até:</label>
-      <input type="date" id="periodo-fim" value="${hoje_iso}" style="border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-size:12px;color:var(--text);background:var(--white)">
-      <button onclick="fetchPeriodo()" style="background:var(--navy);color:var(--gold);border:none;border-radius:5px;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer">Buscar</button>
+  // Bloco de período substituindo o antigo resumo
+  html = `<div class="card" style="margin-bottom:16px;overflow:hidden">
+    <div style="background:var(--navy);padding:8px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="color:var(--gold);font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;flex:none">📊 RESUMO POR PERÍODO</span>
+      <label style="color:rgba(255,255,255,.6);font-size:11px">De:</label>
+      <input type="date" id="periodo-ini" value="${_iniDefault}" style="border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:3px 7px;font-size:11px;background:rgba(255,255,255,.08);color:#fff">
+      <label style="color:rgba(255,255,255,.6);font-size:11px">Até:</label>
+      <input type="date" id="periodo-fim" value="${_fimDefault}" style="border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:3px 7px;font-size:11px;background:rgba(255,255,255,.08);color:#fff">
+      <button onclick="fetchPeriodo()" style="background:var(--gold);color:var(--navy);border:none;border-radius:4px;padding:4px 14px;font-size:11px;font-weight:700;cursor:pointer">Buscar</button>
     </div>
-    <div id="periodo-result"></div>
-  </div>`;
+    <div id="periodo-result"><div style="padding:12px 16px;color:var(--text-muted);font-size:12px">Selecione o período e clique em Buscar.</div></div>
+  </div>` + html;
+
+  // Auto-fetch do período padrão ao carregar
+  setTimeout(fetchPeriodo, 100);
 
   document.getElementById('forecast-content').innerHTML = html;
 }
@@ -1658,35 +1529,42 @@ async function fetchOrganograma() {
 function renderPeriodo(data) {
   const R = v => v != null ? 'R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0}) : '—';
 
-  function card(row, highlight) {
-    const bg   = highlight === 'denise' ? 'background:var(--gold-bg);border:2px solid var(--gold)' :
-                 highlight === 'geral'  ? 'background:#F0F4FF;border:2px solid var(--navy)' :
-                                          'background:var(--white);border:1px solid var(--border)';
-    const title_color = highlight === 'denise' ? 'color:var(--gold)' :
-                        highlight === 'geral'  ? 'color:var(--navy)' : 'color:var(--text)';
-    return `<div style="${bg};border-radius:10px;padding:14px 18px;min-width:200px;flex:1">
-      <div style="${title_color};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${row.squad}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px">
-        <div><div style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px">Realizado</div><div style="color:var(--green);font-weight:700">${R(row.realizado)}</div></div>
-        <div><div style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px">Em Aberto</div><div style="font-weight:600">${R(row.em_aberto)}</div></div>
-        <div><div style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px">Média Prev.</div><div style="font-weight:600">${R(row.media)}</div></div>
-        <div><div style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px">Perda</div><div style="color:var(--red);font-weight:600">${R(row.perda)}</div></div>
-      </div>
-    </div>`;
+  function tr(row, highlight) {
+    const bg = highlight === 'denise' ? 'background:#FFF9E6;border-left:3px solid var(--gold);font-weight:700' :
+               highlight === 'geral'  ? 'background:#F0F4FF;border-left:3px solid var(--navy);font-weight:700' : '';
+    const nc = highlight === 'denise' ? 'color:var(--gold)' :
+               highlight === 'geral'  ? 'color:var(--navy)' : '';
+    return `<tr style="${bg}">
+      <td style="padding:7px 14px;font-size:12px;${nc}">${row.squad}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px">${R(row.p20)}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px">${R(row.p50)}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px">${R(row.p70)}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px">${R(row.media)}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px">${R(row.em_aberto)}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px;color:var(--green);font-weight:700">${R(row.realizado)}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px;color:var(--red)">${R(row.perda)}</td>
+    </tr>`;
   }
 
-  const squads = (data.squads || []).map(sq => card(sq, '')).join('');
-  const denise = data.denise ? card(data.denise, 'denise') : '';
-  const geral  = data.geral  ? card(data.geral,  'geral')  : '';
+  const rows = (data.squads || []).map(sq => tr(sq, '')).join('');
+  const denise_tr = data.denise ? tr(data.denise, 'denise') : '';
+  const geral_tr  = data.geral  ? tr(data.geral,  'geral')  : '';
 
   document.getElementById('periodo-result').innerHTML = `
-    <div style="margin-top:16px">
-      <div style="font-size:10px;color:var(--text-muted);font-style:italic;margin-bottom:10px">
-        Período: ${data.ini} → ${data.fim} &nbsp;·&nbsp; Atualizado: ${data.atualizado_em}
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px">${squads}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px">${denise}${geral}</div>
-    </div>`;
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--navy)">
+        <th style="text-align:left;padding:7px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">Equipe</th>
+        <th style="padding:7px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">20%</th>
+        <th style="padding:7px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">50%</th>
+        <th style="padding:7px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">70%</th>
+        <th style="padding:7px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Média Prev.</th>
+        <th style="padding:7px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Em Aberto</th>
+        <th style="padding:7px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Realizado</th>
+        <th style="padding:7px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Perda</th>
+      </tr></thead>
+      <tbody>${rows}${denise_tr}${geral_tr}</tbody>
+    </table>
+    <div style="text-align:right;padding:6px 14px;color:var(--text-muted);font-size:10px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
 }
 
 async function fetchPeriodo() {
