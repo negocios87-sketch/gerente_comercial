@@ -1149,6 +1149,13 @@ def calcular_forecast(head_filter=None):
     # Resumo do dia de hoje e ontem para Time Denise e Geral
     hoje_str_fc   = date.today().strftime("%Y-%m-%d")
     ontem_str_fc  = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # Próximo dia útil
+    feriados_fc = buscar_feriados()
+    prox_du_fc  = date.today() + timedelta(days=1)
+    while prox_du_fc.weekday() >= 5 or prox_du_fc in feriados_fc:
+        prox_du_fc += timedelta(days=1)
+    prox_du_str_fc = prox_du_fc.strftime("%Y-%m-%d")
     DENISE_FC     = {"sniper", "elite", "olympus", "mgm"}
     GERAL_FC      = {"sniper", "elite", "olympus", "mgm", "latam", "orion", "zenite"}
 
@@ -1180,10 +1187,13 @@ def calcular_forecast(head_filter=None):
         "geral":             resumo_dia(GERAL_FC,  hoje_str_fc),
         "time_denise_ontem": resumo_dia(DENISE_FC, ontem_str_fc),
         "geral_ontem":       resumo_dia(GERAL_FC,  ontem_str_fc),
+        "time_denise_prox":  resumo_dia(DENISE_FC, prox_du_str_fc),
+        "geral_prox":        resumo_dia(GERAL_FC,  prox_du_str_fc),
         "time_denise_mes":   resumo_mes(DENISE_FC),
         "geral_mes":         resumo_mes(GERAL_FC),
         "hoje":  hoje_str_fc,
         "ontem": ontem_str_fc,
+        "prox":  prox_du_str_fc,
     }
     return {"squads": result, "resumo": resumo_fc, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}
 
