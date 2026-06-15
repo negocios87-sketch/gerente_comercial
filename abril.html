@@ -597,8 +597,8 @@ function renderForecast(data) {
   const _iniDefault = new Date(_hoje.getFullYear(), _hoje.getMonth(), 1).toISOString().slice(0,10);
   const _fimDefault = _hoje.toISOString().slice(0,10);
 
-  // Bloco de período substituindo o antigo resumo
-  html = `<div class="card" style="margin-bottom:16px;overflow:hidden">
+  // Bloco de período: container separado ACIMA das tabelas
+  const periodoBlock = `<div class="card" style="margin-bottom:16px;overflow:hidden">
     <div style="background:var(--navy);padding:8px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span style="color:var(--gold);font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;flex:none">📊 RESUMO POR PERÍODO</span>
       <label style="color:rgba(255,255,255,.6);font-size:11px">De:</label>
@@ -607,13 +607,13 @@ function renderForecast(data) {
       <input type="date" id="periodo-fim" value="${_fimDefault}" style="border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:3px 7px;font-size:11px;background:rgba(255,255,255,.08);color:#fff">
       <button onclick="fetchPeriodo()" style="background:var(--gold);color:var(--navy);border:none;border-radius:4px;padding:4px 14px;font-size:11px;font-weight:700;cursor:pointer">Buscar</button>
     </div>
-    <div id="periodo-result"><div style="padding:12px 16px;color:var(--text-muted);font-size:12px">Selecione o período e clique em Buscar.</div></div>
-  </div>` + html;
-
-  // Auto-fetch do período padrão ao carregar
-  setTimeout(fetchPeriodo, 100);
+    <div id="periodo-result"><div style="padding:12px 16px;color:var(--text-muted);font-size:12px">Carregando...</div></div>
+  </div>`;
+  html = periodoBlock + html;
 
   document.getElementById('forecast-content').innerHTML = html;
+  // Auto-fetch período padrão
+  setTimeout(fetchPeriodo, 50);
 }
 
 async function fetchForecast() {
