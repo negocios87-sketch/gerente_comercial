@@ -589,16 +589,14 @@ function renderForecast(data) {
   }
 
   const resumo = data.resumo || {};
-  const COLS = ['Dia','20%','50%','70%','Média Prev.','Em Aberto','Realizado','Perda','Total Prev.','% Ating.'];
-
+  const todayStr = new Date().toISOString().slice(0,10);
   let html = '';
-  // Período padrão = mês atual
+
+  // Bloco período no topo
   const _hoje = new Date();
   const _iniDefault = new Date(_hoje.getFullYear(), _hoje.getMonth(), 1).toISOString().slice(0,10);
   const _fimDefault = _hoje.toISOString().slice(0,10);
-
-  // Bloco de período: container separado ACIMA das tabelas
-  const periodoBlock = `<div class="card" style="margin-bottom:16px;overflow:hidden">
+  html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
     <div style="background:var(--navy);padding:8px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span style="color:var(--gold);font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;flex:none">📊 RESUMO POR PERÍODO</span>
       <label style="color:rgba(255,255,255,.6);font-size:11px">De:</label>
@@ -609,7 +607,102 @@ function renderForecast(data) {
     </div>
     <div id="periodo-result"><div style="padding:12px 16px;color:var(--text-muted);font-size:12px">Selecione o período e clique em Buscar.</div></div>
   </div>`;
-  html = periodoBlock + html;
+
+  // Tabelas por squad
+  Object.entries(squads).forEach(([squad, sq]) => {
+    const rows = sq.rows || [];
+    const tot  = sq.total || {};
+    let tbody = '';
+
+    rows.forEach((row, i) => {
+      const gid = `fc_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
+      const isToday = row.dia === todayStr;
+      const todayStyle = isToday ? 'background:#FFFBEB !important;border-left:3px solid var(--gold);' : '';
+      const diaLabel = row.dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
+      const mediaVal = row.media != null ? R(row.media) : '—';
+      const pctCell  = row.pct_atingimento != null ? pctBadgeFc(row.pct_atingimento) : '—';
+      const realCell = row.realizado > 0
+        ? `<span style="color:var(--green);font-weight:700">${R(row.realizado)}</span>`
+        : `<span style="color:var(--text-muted)">${R(row.realizado)}</span>`;
+      const perdaCell = row.perda > 0
+        ? `<span style="color:var(--red)">${R(row.perda)}</span>`
+        : `<span style="color:var(--text-muted)">${R(row.perda)}</span>`;
+
+      tbody += `<tr class="row-group fc-open" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${todayStyle}">
+        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
+        <td class="col-fc">${R(row.p20||0)}</td>
+        <td class="col-fc">${R(row.p50||0)}</td>
+        <td class="col-fc">${R(row.p70||0)}</td>
+        <td class="col-fc fc-media-val">${mediaVal}</td>
+        <td class="col-fc fc-gray">${R(row.em_aberto||0)}</td>
+        <td class="col-fc">${realCell}</td>
+        <td class="col-fc">${perdaCell}</td>
+        <td class="col-fc fc-total-bold">${R((row.em_aberto||0)+(row.realizado||0)+(row.perda||0))}</td>
+        <td class="col-fc">${pctCell}</td>
+      </tr>`;
+
+      // Closer sub-rows
+      Object.entries(row.closers || {}).forEach(([cNome, c]) => {
+        const cReal = c.realizado > 0
+          ? `<span style="color:var(--green);font-size:11px">${R(c.realizado)}</span>`
+          : `<span style="color:var(--text-muted);font-size:11px">${R(c.realizado)}</span>`;
+        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:table-row">
+          <td style="padding-left:32px">
+            <div class="name-cell">${avatarHtml(cNome)}<span style="font-size:11px">${cNome}</span></div>
+          </td>
+          <td class="col-fc" style="font-size:11px">${R(c.p20||0)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.p50||0)}</td>
+          <td class="col-fc" style="font-size:11px">${R(c.p70||0)}</td>
+          <td class="col-fc fc-media-val" style="font-size:11px">${c.media!=null?R(c.media):'—'}</td>
+          <td class="col-fc fc-gray" style="font-size:11px">${R(c.em_aberto||0)}</td>
+          <td class="col-fc" style="font-size:11px">${cReal}</td>
+          <td class="col-fc" style="font-size:11px;color:${(c.perda||0)>0?'var(--red)':'var(--text-muted)'}">${R(c.perda||0)}</td>
+          <td class="col-fc fc-total-bold" style="font-size:11px">${R((c.em_aberto||0)+(c.realizado||0)+(c.perda||0))}</td>
+          <td class="col-fc" style="font-size:11px">—</td>
+        </tr>`;
+      });
+    });
+
+    // Total row
+    tbody += `<tr class="row-total">
+      <td>TOTAL</td>
+      <td>${R(tot.p20||0)}</td><td>${R(tot.p50||0)}</td><td>${R(tot.p70||0)}</td>
+      <td class="fc-media-val">${R(tot.media||0)}</td>
+      <td class="fc-gray">${R(tot.em_aberto||0)}</td>
+      <td style="color:var(--green);font-weight:700">${R(tot.realizado||0)}</td>
+      <td style="color:${(tot.perda||0)>0?'var(--red)':'var(--text-muted)'}">${R(tot.perda||0)}</td>
+      <td class="fc-total-bold">${R((tot.em_aberto||0)+(tot.realizado||0)+(tot.perda||0))}</td>
+      <td>${tot.pct_atingimento!=null?pctBadgeFc(tot.pct_atingimento):'—'}</td>
+    </tr>`;
+
+    html += `
+    <div class="squad-block">
+      <div class="squad-header">
+        <div class="squad-title">${squad}</div>
+        <div class="squad-divider"></div>
+      </div>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:120px">Dia</th>
+              <th>20%</th><th>50%</th><th>70%</th>
+              <th style="color:#7C3AED">Média Prev.</th>
+              <th style="color:#9CA3AF">Em Aberto</th>
+              <th style="color:#6EE7B7">Realizado</th>
+              <th style="color:#FCA5A5">Perda</th>
+              <th>Total Prev.</th>
+              <th>% Ating.</th>
+            </tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
+  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
 
   document.getElementById('forecast-content').innerHTML = html;
 }
