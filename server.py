@@ -2160,6 +2160,181 @@ def calcular_ranking(mes=None, ano=None):
     }
 
 
+
+# ── RESUMO POR PERÍODO ────────────────────────────────────────
+
+@app.route("/api/forecast/periodo")
+def api_forecast_periodo():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        data_ini = request.args.get("ini", "")
+        data_fim = request.args.get("fim", "")
+        if not data_ini or not data_fim:
+            return jsonify({"erro": "Parâmetros ini e fim obrigatórios"}), 400
+
+        from collections import defaultdict
+        hoje_fc  = date.today()
+        colab_df = buscar_colaboradores(mes=hoje_fc.month, ano=hoje_fc.year)
+        sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
+        nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
+        head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
+        nome_to_subarea = {}
+        nome_to_head    = {}
+        for _, row in colab_df.iterrows():
+            nn  = norm(str(row.get(nome_col, "")))
+            sub = str(row.get(sub_col, "")).strip() if sub_col else ""
+            hd  = str(row.get(head_col, "")).strip() if head_col else ""
+            nome_to_subarea[nn] = sub
+            nome_to_head[nn]    = hd
+
+        # Hierarquia
+        nome_sess  = session.get("nome", "")
+        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
+        is_denise_p = norm(nome_sess) == DENISE_NORM
+        if norm(nome_sess) in superusers or is_denise_p:
+            squads_visiveis = None
+        else:
+            head_nn = norm(nome_sess)
+            squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
+                               if norm(nome_to_head.get(nn, "")) == head_nn and sub}
+
+        # Determina meses no range
+        from datetime import datetime as dt2
+        d_ini = date.fromisoformat(data_ini)
+        d_fim = date.fromisoformat(data_fim)
+        meses = set()
+        d = d_ini
+        while d <= d_fim:
+            meses.add((d.year, d.month))
+            d = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+        # Busca deals ganhos pelo FILTER_DEALS no range
+        pipes_p   = buscar_pipelines()
+        users_p   = buscar_users_pipe()
+        uid_to_nn = {uid: norm(name) for uid, name in users_p.items()}
+
+        all_deals_ganhos = []
+        for (ano_m, mes_m) in sorted(meses):
+            all_deals_ganhos += buscar_deals_ganhos_todos(mes=mes_m, ano=ano_m)
+
+        # Busca deals em aberto (forecast) no range
+        all_deals_fc = buscar_deals_forecast()
+
+        DENISE_SQ = {"sniper", "elite", "olympus", "mgm"}
+        EXCLUIR   = {"zenite", "licenciados"}
+
+        def squad_visivel(sub_key):
+            if squads_visiveis is None: return True
+            if norm(sub_key) in {norm(s) for s in squads_visiveis}: return True
+            for sv in squads_visiveis:
+                if norm(display_squad(sv)) == norm(sub_key): return True
+            return False
+
+        # Realizado por squad no range
+        realizado = defaultdict(float)
+        for deal in all_deals_ganhos:
+            wt = won_time_br(deal)[:10]
+            if not wt or wt < data_ini or wt > data_fim: continue
+            sq_funil = squad_por_funil(deal, pipes_p)
+            if sq_funil:
+                sub_key = sq_funil
+            else:
+                owner_nn = norm(get_owner_name(deal))
+                if not owner_nn:
+                    oid = get_owner_id(deal)
+                    owner_nn = uid_to_nn.get(oid, "")
+                sub = nome_to_subarea.get(owner_nn, "")
+                if not sub: continue
+                sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
+            if not squad_visivel(sub_key): continue
+            realizado[sub_key] += float(deal.get("value") or 0)
+
+        # Em aberto, perda, média por squad (expected_close_date no range)
+        em_aberto = defaultdict(float)
+        perda      = defaultdict(float)
+        media      = defaultdict(float)
+        p20 = defaultdict(float); p50 = defaultdict(float); p70 = defaultdict(float)
+
+        for deal in all_deals_fc:
+            status = deal.get("status")
+            if status == "won": continue
+            if status == "lost":
+                dt_key = str(deal.get("close_time") or "")[:10]
+            else:
+                dt_key = deal.get("expected_close_date") or ""
+            if not dt_key or dt_key < data_ini or dt_key > data_fim: continue
+            owner_nn = norm(get_owner_name(deal))
+            sub = nome_to_subarea.get(owner_nn, "")
+            if not sub: continue
+            sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
+            if not squad_visivel(sub_key): continue
+            value = float(deal.get("value") or 0)
+            prob  = deal.get("probability")
+            if status == "lost":
+                perda[sub_key] += value
+            else:
+                em_aberto[sub_key] += value
+                media[sub_key]     += value * ((prob or 0) / 100)
+                if prob == 20:   p20[sub_key] += value
+                elif prob == 50: p50[sub_key] += value
+                elif prob == 70: p70[sub_key] += value
+
+        # Monta squads
+        all_squads = set(realizado) | set(em_aberto) | set(perda)
+        ORDER = ["Sniper", "Elite", "Olympus", "LATAM", "Orion"]
+
+        def mk_row(sq):
+            r = arred(realizado.get(sq, 0))
+            e = arred(em_aberto.get(sq, 0))
+            m = arred(media.get(sq, 0))
+            pe = arred(perda.get(sq, 0))
+            return {"squad": sq, "realizado": r, "em_aberto": e,
+                    "media": m, "perda": pe,
+                    "p20": arred(p20.get(sq,0)), "p50": arred(p50.get(sq,0)), "p70": arred(p70.get(sq,0)),
+                    "total_prev": arred(r + e)}
+
+        squads_out = [mk_row(sq) for sq in ORDER if sq in all_squads and norm(sq) not in EXCLUIR]
+        # Extra squads fora da ordem
+        for sq in sorted(all_squads):
+            if sq not in ORDER and norm(sq) not in EXCLUIR:
+                squads_out.append(mk_row(sq))
+
+        # Denise consolidado (Sniper + Elite + Olympus)
+        denise_sqs = [sq for sq in all_squads if norm(sq) in DENISE_SQ]
+        denise_row = {
+            "squad": "Time Denise",
+            "realizado":  arred(sum(realizado.get(sq,0) for sq in denise_sqs)),
+            "em_aberto":  arred(sum(em_aberto.get(sq,0) for sq in denise_sqs)),
+            "media":      arred(sum(media.get(sq,0) for sq in denise_sqs)),
+            "perda":      arred(sum(perda.get(sq,0) for sq in denise_sqs)),
+            "p20": arred(sum(p20.get(sq,0) for sq in denise_sqs)),
+            "p50": arred(sum(p50.get(sq,0) for sq in denise_sqs)),
+            "p70": arred(sum(p70.get(sq,0) for sq in denise_sqs)),
+            "total_prev": arred(sum((realizado.get(sq,0)+em_aberto.get(sq,0)) for sq in denise_sqs)),
+        }
+
+        # Geral
+        geral_row = {
+            "squad": "Geral",
+            "realizado":  arred(sum(realizado.values())),
+            "em_aberto":  arred(sum(em_aberto.values())),
+            "media":      arred(sum(media.values())),
+            "perda":      arred(sum(perda.values())),
+            "p20": arred(sum(p20.values())), "p50": arred(sum(p50.values())), "p70": arred(sum(p70.values())),
+            "total_prev": arred(sum(realizado.values()) + sum(em_aberto.values())),
+        }
+
+        return jsonify(limpar_nans({
+            "squads": squads_out,
+            "denise": denise_row,
+            "geral":  geral_row,
+            "ini": data_ini, "fim": data_fim,
+            "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+        }))
+    except Exception as e:
+        import traceback
+        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
