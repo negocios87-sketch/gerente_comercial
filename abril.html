@@ -628,7 +628,7 @@ function renderForecast(data) {
         ? `<span style="color:var(--red)">${R(row.perda)}</span>`
         : `<span style="color:var(--text-muted)">${R(row.perda)}</span>`;
 
-      tbody += `<tr class="row-group fc-open" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${todayStyle}">
+      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${todayStyle}">
         <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
         <td class="col-fc">${R(row.p20||0)}</td>
         <td class="col-fc">${R(row.p50||0)}</td>
@@ -641,12 +641,13 @@ function renderForecast(data) {
         <td class="col-fc">${pctCell}</td>
       </tr>`;
 
-      // Closer sub-rows
-      Object.entries(row.closers || {}).forEach(([cNome, c]) => {
+      // Closer sub-rows (closers é lista de objetos com .nome)
+      (row.closers || []).forEach(c => {
+        const cNome = c.nome || '';
         const cReal = c.realizado > 0
           ? `<span style="color:var(--green);font-size:11px">${R(c.realizado)}</span>`
           : `<span style="color:var(--text-muted);font-size:11px">${R(c.realizado)}</span>`;
-        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:table-row">
+        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
           <td style="padding-left:32px">
             <div class="name-cell">${avatarHtml(cNome)}<span style="font-size:11px">${cNome}</span></div>
           </td>
