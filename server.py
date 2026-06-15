@@ -2217,8 +2217,9 @@ def api_forecast_periodo():
         for (ano_m, mes_m) in sorted(meses):
             all_deals_ganhos += buscar_deals_ganhos_todos(mes=mes_m, ano=ano_m)
 
-        # Busca deals em aberto (forecast) no range
-        all_deals_fc = buscar_deals_forecast()
+        # Usa calcular_forecast para pegar em aberto/perda/média (mesma fonte das tabelas)
+        fc_data = calcular_forecast(head_filter=None if (norm(nome_sess) in superusers or is_denise_p) else nome_sess)
+        fc_squads = fc_data.get("squads", {})
 
         DENISE_SQ = {"sniper", "elite", "olympus", "mgm"}
         EXCLUIR   = {"zenite", "licenciados"}
@@ -2230,7 +2231,7 @@ def api_forecast_periodo():
                 if norm(display_squad(sv)) == norm(sub_key): return True
             return False
 
-        # Realizado por squad no range
+        # Realizado por squad no range (FILTER_DEALS)
         realizado = defaultdict(float)
         for deal in all_deals_ganhos:
             wt = won_time_br(deal)[:10]
@@ -2249,35 +2250,22 @@ def api_forecast_periodo():
             if not squad_visivel(sub_key): continue
             realizado[sub_key] += float(deal.get("value") or 0)
 
-        # Em aberto, perda, média por squad (expected_close_date no range)
+        # Em aberto, perda, média — soma das rows do calcular_forecast no range
         em_aberto = defaultdict(float)
         perda      = defaultdict(float)
         media      = defaultdict(float)
         p20 = defaultdict(float); p50 = defaultdict(float); p70 = defaultdict(float)
 
-        for deal in all_deals_fc:
-            status = deal.get("status")
-            if status == "won": continue
-            if status == "lost":
-                dt_key = str(deal.get("close_time") or "")[:10]
-            else:
-                dt_key = deal.get("expected_close_date") or ""
-            if not dt_key or dt_key < data_ini or dt_key > data_fim: continue
-            owner_nn = norm(get_owner_name(deal))
-            sub = nome_to_subarea.get(owner_nn, "")
-            if not sub: continue
-            sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
-            if not squad_visivel(sub_key): continue
-            value = float(deal.get("value") or 0)
-            prob  = deal.get("probability")
-            if status == "lost":
-                perda[sub_key] += value
-            else:
-                em_aberto[sub_key] += value
-                media[sub_key]     += value * ((prob or 0) / 100)
-                if prob == 20:   p20[sub_key] += value
-                elif prob == 50: p50[sub_key] += value
-                elif prob == 70: p70[sub_key] += value
+        for sq_name, sq_data in fc_squads.items():
+            if not squad_visivel(sq_name): continue
+            for row in sq_data.get("rows", []):
+                if row["dia"] < data_ini or row["dia"] > data_fim: continue
+                em_aberto[sq_name] += row.get("em_aberto", 0)
+                perda[sq_name]     += row.get("perda", 0)
+                media[sq_name]     += row.get("media", 0)
+                p20[sq_name]       += row.get("p20", 0)
+                p50[sq_name]       += row.get("p50", 0)
+                p70[sq_name]       += row.get("p70", 0)
 
         # Monta squads
         all_squads = set(realizado) | set(em_aberto) | set(perda)
