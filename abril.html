@@ -613,6 +613,8 @@ function renderForecast(data) {
           ${resumo.geral ? resumoFcRow('🔷 Hoje — Geral', resumo.geral, false) : ''}
           ${resumo.time_denise_ontem ? resumoFcRow('◀ Ontem — Time Denise', resumo.time_denise_ontem, true) : ''}
           ${resumo.geral_ontem ? resumoFcRow('◀ Ontem — Geral', resumo.geral_ontem, false) : ''}
+          ${resumo.time_denise_prox ? resumoFcRow('▶ Próx. Dia Útil — Time Denise', resumo.time_denise_prox, true) : ''}
+          ${resumo.geral_prox ? resumoFcRow('▶ Próx. Dia Útil — Geral', resumo.geral_prox, false) : ''}
           ${resumo.time_denise_mes ? resumoFcRow('📅 Mês — Time Denise', resumo.time_denise_mes, true) : ''}
           ${resumo.geral_mes ? resumoFcRow('📅 Mês — Geral', resumo.geral_mes, false) : ''}
         </tbody>
