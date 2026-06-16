@@ -549,6 +549,13 @@ function toggleFcCloser(gid) {
   members.forEach(r => r.style.display = opening ? 'table-row' : 'none');
 }
 
+function toggleFcCloser(cgid) {
+  const dealRows = document.querySelectorAll(`tr[data-fc-dealid="${cgid}"]`);
+  dealRows.forEach(r => {
+    r.style.display = r.style.display === 'none' ? 'table-row' : 'none';
+  });
+}
+
 function toggleFcDay(gid) {
   const grp = document.querySelector(`[data-fc-gid="${gid}"]`);
   const members = document.querySelectorAll(`[data-fc-mid="${gid}"]`);
@@ -644,12 +651,14 @@ function renderForecast(data) {
       // Closer sub-rows (closers é lista de objetos com .nome)
       (row.closers || []).forEach(c => {
         const cNome = c.nome || '';
+        const cgid  = `${gid}_${cNome.replace(/[^a-zA-Z0-9]/g,'_')}`;
         const cReal = c.realizado > 0
           ? `<span style="color:var(--green);font-size:11px">${R(c.realizado)}</span>`
           : `<span style="color:var(--text-muted);font-size:11px">${R(c.realizado)}</span>`;
-        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
+        const hasDeals = (c.deals || []).length > 0;
+        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none;${hasDeals?'cursor:pointer':''}" ${hasDeals?`onclick="toggleFcCloser('${cgid}')"`:''}>
           <td style="padding-left:32px">
-            <div class="name-cell">${avatarHtml(cNome)}<span style="font-size:11px">${cNome}</span></div>
+            <div class="name-cell">${avatarHtml(cNome)}<span style="font-size:11px">${cNome}</span>${hasDeals?`<span style="font-size:9px;color:var(--text-muted);margin-left:4px">(${c.deals.length})</span>`:''}</div>
           </td>
           <td class="col-fc" style="font-size:11px">${R(c.p20||0)}</td>
           <td class="col-fc" style="font-size:11px">${R(c.p50||0)}</td>
@@ -661,6 +670,20 @@ function renderForecast(data) {
           <td class="col-fc fc-total-bold" style="font-size:11px">${R((c.em_aberto||0)+(c.realizado||0)+(c.perda||0))}</td>
           <td class="col-fc" style="font-size:11px">—</td>
         </tr>`;
+
+        // Deal rows (terceiro nível)
+        (c.deals || []).forEach(deal => {
+          const dStatus = deal.status === 'won' ? `<span style="color:var(--green);font-size:10px">✓ Ganho</span>` :
+                          deal.status === 'lost' ? `<span style="color:var(--red);font-size:10px">✗ Perdido</span>` :
+                          `<span style="color:var(--text-muted);font-size:10px">${deal.probabilidade||''}%</span>`;
+          tbody += `<tr class="row-deal" data-fc-dealid="${cgid}" style="display:none;background:#FAFAFA">
+            <td style="padding-left:52px;font-size:10px;color:var(--text-muted)">${deal.titulo||'—'}</td>
+            <td colspan="8" style="font-size:10px;text-align:left;padding-left:8px">
+              ${dStatus} &nbsp; <span style="font-weight:600">${R(deal.valor)}</span>
+            </td>
+            <td></td>
+          </tr>`;
+        });
       });
     });
 
