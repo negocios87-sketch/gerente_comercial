@@ -897,7 +897,9 @@ def logout():
 @app.route("/abril")
 def abril():
     if "nome" not in session: return redirect("/login")
-    return render_template("abril.html", nome=session["nome"], is_master=is_master(session["nome"]))
+    nome_s = session["nome"]
+    is_denise_render = norm(nome_s) == DENISE_NORM
+    return render_template("abril.html", nome=nome_s, is_master=is_master(nome_s), is_denise=is_denise_render)
 
 @app.route("/api/abril")
 def api_abril():
