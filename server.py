@@ -926,10 +926,11 @@ def api_abril():
                 lider_col_l = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
                 is_lider = False
                 lider_sub = None
+                sub_col_l = next((c for c in colab_df.columns if norm(c) == "subarea"), "Subarea")
                 if lider_col_l:
                     for _, row in colab_df.iterrows():
                         if norm(str(row.get(lider_col_l, ""))) == nn_sess:
-                            sub = str(row.get(sub_col if (sub_col := next((c for c in colab_df.columns if norm(c) == "subarea"), None)) else "Subarea", "")).strip()
+                            sub = str(row.get(sub_col_l, "")).strip()
                             if sub:
                                 lider_sub = sub
                                 is_lider = True
