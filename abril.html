@@ -676,8 +676,11 @@ function renderForecast(data) {
           const dStatus = deal.status === 'won' ? `<span style="color:var(--green);font-size:10px">✓ Ganho</span>` :
                           deal.status === 'lost' ? `<span style="color:var(--red);font-size:10px">✗ Perdido</span>` :
                           `<span style="color:var(--text-muted);font-size:10px">${deal.probabilidade||''}%</span>`;
+          const dealUrl = `https://boardacademy.pipedrive.com/deal/${deal.id}`;
           tbody += `<tr class="row-deal" data-fc-dealid="${cgid}" style="display:none;background:#FAFAFA">
-            <td style="padding-left:52px;font-size:10px;color:var(--text-muted)">${deal.titulo||'—'}</td>
+            <td style="padding-left:52px;font-size:10px;color:var(--text-muted)">
+              <a href="${dealUrl}" target="_blank" style="color:var(--navy);text-decoration:none;font-size:10px" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${deal.titulo||'—'} ↗</a>
+            </td>
             <td colspan="8" style="font-size:10px;text-align:left;padding-left:8px">
               ${dStatus} &nbsp; <span style="font-weight:600">${R(deal.valor)}</span>
             </td>
