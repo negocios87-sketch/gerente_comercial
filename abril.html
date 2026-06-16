@@ -757,7 +757,7 @@ document.head.appendChild(fcStyle);
 
 // ── SNAPSHOT / HISTÓRICO ─────────────────────────────────────
 const IS_MASTER = {{ "true" if is_master else "false" }};
-const IS_DENISE = {{ "true" if nome|lower == "denise mussolin" else "false" }};
+const IS_DENISE = {{ "true" if is_denise else "false" }};
 
 async function salvarSnapshot(force=false) {
   const url = force ? '/api/snapshot/sobrepor' : '/api/snapshot';
