@@ -441,10 +441,34 @@ function renderSdrs(sdrs, total, squadIdx, squadNome) {
     });
     Object.entries(byLider).forEach(([liderNome, membros]) => {
       const lgid = `${gid}_${liderNome.replace(/[^a-zA-Z0-9]/g,'_')}`;
-      memberRows += `<tr style="background:#F0F4FF;border-left:3px solid var(--navy)">
-        <td colspan="14" style="padding:6px 14px;font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px">
-          👤 Time ${liderNome} (${membros.length})
-        </td>
+
+      // Calcula totais do time do líder
+      const tot_val    = membros.reduce((a,s) => a + (s.validadas||0), 0);
+      const tot_meta_r = membros.reduce((a,s) => a + (s.meta_reuniao||0), 0);
+      const tot_meta_g = membros.reduce((a,s) => a + (s.meta_ganho||0), 0);
+      const tot_ganho  = membros.reduce((a,s) => a + (s.valor_ganho||0), 0);
+      const tot_multi  = membros.reduce((a,s) => a + (s.valor_ganho_multi||0), 0);
+      const tot_qtd    = membros.reduce((a,s) => a + (s.qtd_ganhos||0), 0);
+      const tot_dev    = membros.reduce((a,s) => a + (s.deveria_estar||0), 0);
+      const tot_faltam = tot_dev - tot_val;
+      const pct_reu_t  = tot_meta_r > 0 ? (tot_val/tot_meta_r*100).toFixed(1)+'%' : '—';
+      const pct_g_t    = tot_meta_g > 0 ? (tot_ganho/tot_meta_g*100).toFixed(1)+'%' : '—';
+
+      memberRows += `<tr style="background:#F0F4FF;border-left:3px solid var(--navy);cursor:pointer" onclick="toggleGroup('${lgid}')">
+        <td style="padding:6px 14px;font-size:11px;font-weight:700;color:var(--navy)">👤 Time ${liderNome} (${membros.length})</td>
+        <td style="text-align:right;font-size:11px;font-weight:700">${N(tot_meta_r)}</td>
+        <td style="text-align:right;font-size:11px">—</td>
+        <td style="text-align:right;font-size:11px;font-weight:700">${N(tot_val)}</td>
+        <td style="text-align:right;font-size:11px">${tot_dev.toFixed(0)}</td>
+        <td style="text-align:right;font-size:11px">${tot_faltam<=0?'<span class="surplus">'+N(Math.abs(tot_faltam))+'</span>':'<span class="deficit">'+N(tot_faltam)+'</span>'}</td>
+        <td style="text-align:right;font-size:11px">${pct_reu_t}</td>
+        <td style="text-align:right;font-size:11px;font-weight:700">${R(tot_meta_g)}</td>
+        <td style="text-align:right;font-size:11px">${N(tot_qtd)}</td>
+        <td style="text-align:right;font-size:11px">${R(tot_ganho)}</td>
+        <td style="text-align:right;font-size:11px">${R(tot_multi)}</td>
+        <td style="text-align:right;font-size:11px">${pct_g_t}</td>
+        <td style="text-align:right;font-size:11px">—</td>
+        <td style="text-align:right;font-size:11px">—</td>
       </tr>`;
       memberRows += membros.map(s => sdrRow(s, true, lgid)).join('');
     });
