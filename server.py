@@ -458,10 +458,17 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     pessoas_visiveis = None  # None = todos; set = só essas pessoas (por nome_norm)
 
+    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus"}
+
     if head_filter is None:
         squads_visiveis = None
+        pessoas_visiveis = None
+    elif head_filter == "__denise__":
+        squads_visiveis = DENISE_SQUADS_VISIVEIS
+        pessoas_visiveis = None
     elif head_filter == "__none__":
         squads_visiveis = set()
+        pessoas_visiveis = None
     elif head_filter.startswith("__lider__:"):
         lider_filter_nn = norm(head_filter.replace("__lider__:", ""))
         lider_sub = next((sub for nn, sub in nome_to_subarea.items()
@@ -701,6 +708,45 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         })
 
     sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
+
+    # Líderes/Team Leaders que fizeram reuniões mas não têm meta SDR
+    # (ex: Stephanie, Mylena — aparecem na seção SDR com is_lider=True, sem meta)
+    team_leaders_set = set()
+    if lider_col:
+        for _, row in colab_df.iterrows():
+            nn_row  = norm(str(row.get(nome_col, "")))
+            lid_row = norm(str(row.get(lider_col, "")))
+            if nn_row == lid_row and nn_row:
+                team_leaders_set.add(nn_row)
+
+    for uid, uname in users_pipe.items():
+        nn  = norm(uname)
+        sub = nome_to_subarea.get(nn, "")
+        if not sub or not visivel(sub, nn): continue
+        if nn in sdr_nomes_ja: continue
+        if nn not in team_leaders_set: continue
+        uid_str = str(uid)
+        acts_tl  = acts_by_owner.get(uid_str, [])
+        validadas_tl = [a for a in acts_tl if act_valida(a, sub)]
+        qtd_tl = len(validadas_tl)
+        if qtd_tl == 0: continue
+        # Financeiro via qualificador
+        qual_id_tl = qual_ids.get(nn)
+        deals_tl   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id_tl)] if qual_id_tl else []
+        valor_tl   = sum(float(d.get("value") or 0) for d in deals_tl)
+        valor_multi_tl = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_tl)
+        get_squad(sub)["sdrs_ind"].append({
+            "nome": uname, "subarea": sub,
+            "lider": uname,
+            "is_lider": True,
+            "meta_reuniao": 0, "meta_diaria": 0,
+            "validadas": qtd_tl, "deveria_estar": 0, "faltam": 0,
+            "pct_reu": 0,
+            "meta_ganho": 0, "qtd_ganhos": len(deals_tl),
+            "valor_ganho": arred(valor_tl), "valor_ganho_multi": arred(valor_multi_tl),
+            "pct_ganhos": 0, "ticket_medio": arred(safe_div(valor_tl, len(deals_tl))) if deals_tl else 0,
+            "pct_final": 0,
+        })
     for uid, uname in users_pipe.items():
         nn = norm(uname)
         if nn not in lider_nomes and nn not in team_leaders: continue
@@ -946,6 +992,8 @@ def api_abril():
         nn_sess = norm(nome_sess)
         if nn_sess in superusers:
             head_filter = None
+        elif nn_sess == DENISE_NORM:
+            head_filter = "__denise__"
         else:
             is_head = False
             if head_col:
@@ -1080,7 +1128,10 @@ def calcular_forecast(head_filter=None):
         hd  = str(row.get(head_col, "")).strip() if head_col else ""
         nome_to_subarea[nn] = sub
         nome_to_head[nn]    = hd
-    if head_filter and not head_filter.startswith("__"):
+    DENISE_SQ_VIS = {"sniper", "elite", "mgm", "olympus"}
+    if head_filter == "__denise__":
+        squads_visiveis = DENISE_SQ_VIS
+    elif head_filter and not head_filter.startswith("__"):
         head_nn = norm(head_filter)
         squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items() if norm(nome_to_head.get(nn, "")) == head_nn and sub}
     elif head_filter and head_filter.startswith("__lider__:"):
@@ -1475,8 +1526,14 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
     uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
 
     # Squads visíveis
+    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus"}
+
     if head_filter is None:
         squads_visiveis = None
+        pessoas_visiveis = None
+    elif head_filter == "__denise__":
+        squads_visiveis = DENISE_SQUADS_VISIVEIS
+        pessoas_visiveis = None
     elif head_filter == "__none__":
         squads_visiveis = set()
     elif head_filter.startswith("__squad__:"):
