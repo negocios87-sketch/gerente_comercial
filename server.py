@@ -674,8 +674,11 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         valor_multi   = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
         pct_ganhos    = arred(safe_div(valor_multi, meta_fin) * 100)
         pct_final     = arred(pct_reu * PESO_REU + pct_ganhos * PESO_FIN)
+        lider_nn_sdr = nome_to_lider.get(norm(m["nome"]), "")
+        lider_nome_sdr = next((name for nn2, name in [(norm(n), n) for n in [r.get(nome_col,"") for _, r in colab_df.iterrows()]] if nn2 == lider_nn_sdr), lider_nn_sdr)
         get_squad(sub)["sdrs_ind"].append({
             "nome": m["nome"], "subarea": sub,
+            "lider": lider_nome_sdr,
             "meta_reuniao": meta_reu,
             "meta_diaria": arred(safe_div(meta_reu, du_total)),
             "validadas": qtd_val,
