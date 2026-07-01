@@ -437,7 +437,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         hd  = str(row.get(head_col, "")).strip() if head_col else ""
         cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
         nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = hd
+        nome_to_head[nn]    = norm(hd)
         nome_to_cargo[nn]   = cg
 
     team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
@@ -488,7 +488,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         )
         # Só pessoas cujo head = esse head
         pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
-                            if norm(hd) == head_nn}
+                            if hd == head_nn}
 
     def visivel(sub, nome_nn=None):
         if squads_visiveis is None: return True
@@ -1127,7 +1127,7 @@ def calcular_forecast(head_filter=None):
         sub = str(row.get(sub_col, "")).strip() if sub_col else ""
         hd  = str(row.get(head_col, "")).strip() if head_col else ""
         nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = hd
+        nome_to_head[nn]    = norm(hd)
     DENISE_SQ_VIS = {"sniper", "elite", "mgm", "olympus"}
     if head_filter == "__denise__":
         squads_visiveis = DENISE_SQ_VIS
@@ -1516,7 +1516,7 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
         hd  = str(row.get(head_col, "")).strip() if head_col else ""
         cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
         nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = hd
+        nome_to_head[nn]    = norm(hd)
         nome_to_cargo[nn]   = cg
 
     team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
