@@ -735,6 +735,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         deals_tl   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id_tl)] if qual_id_tl else []
         valor_tl   = sum(float(d.get("value") or 0) for d in deals_tl)
         valor_multi_tl = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_tl)
+        # Evita duplicata
+        nomes_ja_no_squad = {norm(s["nome"]) for s in get_squad(sub)["sdrs_ind"]}
+        if nn in nomes_ja_no_squad: continue
         get_squad(sub)["sdrs_ind"].append({
             "nome": uname, "subarea": sub,
             "lider": uname,
