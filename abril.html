@@ -423,10 +423,35 @@ function sdrRow(s, isMember, gid) {
   </tr>`;
 }
 
-function renderSdrs(sdrs, total, squadIdx) {
+function renderSdrs(sdrs, total, squadIdx, squadNome) {
   if (!sdrs || !sdrs.length) return '';
   const gid = `sg_${squadIdx}`;
-  let memberRows = sdrs.map((s,i) => sdrRow(s, true, gid)).join('');
+
+  // Se for Sniper, agrupa por líder
+  const isSniper = (squadNome||'').toLowerCase() === 'sniper';
+  let memberRows = '';
+
+  if (isSniper) {
+    // Agrupa por líder
+    const byLider = {};
+    sdrs.forEach(s => {
+      const l = s.lider || 'Sem Líder';
+      if (!byLider[l]) byLider[l] = [];
+      byLider[l].push(s);
+    });
+    Object.entries(byLider).forEach(([liderNome, membros]) => {
+      const lgid = `${gid}_${liderNome.replace(/[^a-zA-Z0-9]/g,'_')}`;
+      memberRows += `<tr style="background:#F0F4FF;border-left:3px solid var(--navy)">
+        <td colspan="14" style="padding:6px 14px;font-size:10px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px">
+          👤 Time ${liderNome} (${membros.length})
+        </td>
+      </tr>`;
+      memberRows += membros.map(s => sdrRow(s, true, lgid)).join('');
+    });
+  } else {
+    memberRows = sdrs.map((s,i) => sdrRow(s, true, gid)).join('');
+  }
+
   const sdrHeaders = `<thead><tr>
     <th style="text-align:left">SDR</th><th>Meta Reu.</th><th>Meta/Dia</th>
     <th>Validadas</th><th>Deveria Estar</th><th>Faltam</th><th>% Reu.</th>
@@ -509,7 +534,7 @@ function renderAbril(data) {
         <div class="squad-title">${sq.nome}</div>
         <div class="squad-divider"></div>
       </div>
-      ${renderSdrs(sq.sdrs, sq.sdr_total, i)}
+      ${renderSdrs(sq.sdrs, sq.sdr_total, i, sq.nome)}
       ${renderClosers(sq.closers, sq.closer_total, i)}
     </div>`;
   });
