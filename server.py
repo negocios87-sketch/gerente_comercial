@@ -456,16 +456,20 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     lider_filter_nn = None  # nome normalizado do líder, quando filtro é __lider__
 
+    pessoas_visiveis = None  # None = todos; set = só essas pessoas (por nome_norm)
+
     if head_filter is None:
         squads_visiveis = None
     elif head_filter == "__none__":
         squads_visiveis = set()
     elif head_filter.startswith("__lider__:"):
         lider_filter_nn = norm(head_filter.replace("__lider__:", ""))
-        # Squad do líder
         lider_sub = next((sub for nn, sub in nome_to_subarea.items()
                           if nn == lider_filter_nn and sub), None)
         squads_visiveis = {norm(lider_sub)} if lider_sub else set()
+        # Só membros cujo líder = esse líder (ou o próprio líder)
+        pessoas_visiveis = {nn for nn, lid in nome_to_lider.items()
+                            if lid == lider_filter_nn or nn == lider_filter_nn}
     elif head_filter.startswith("__squad__:"):
         sub_direto = norm(head_filter.replace("__squad__:", ""))
         squads_visiveis = {sub_direto}
@@ -475,14 +479,16 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             norm(sub) for nn, sub in nome_to_subarea.items()
             if norm(nome_to_head.get(nn, "")) == head_nn and sub
         )
+        # Só pessoas cujo head = esse head
+        pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
+                            if norm(hd) == head_nn}
 
     def visivel(sub, nome_nn=None):
         if squads_visiveis is None: return True
         if not squads_visiveis: return False
         if norm(sub) not in squads_visiveis: return False
-        # Filtro de líder: só mostra membros cujo líder = lider_filter_nn
-        if lider_filter_nn and nome_nn:
-            return nome_to_lider.get(nome_nn) == lider_filter_nn or nome_nn == lider_filter_nn
+        if pessoas_visiveis is not None and nome_nn:
+            return nome_nn in pessoas_visiveis
         return True
 
     closer_real = {}        # nn -> {valor, valor_multi, qtd}
