@@ -465,7 +465,10 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         pessoas_visiveis = None
     elif head_filter == "__denise__":
         squads_visiveis = DENISE_SQUADS_VISIVEIS
-        pessoas_visiveis = None
+        # Denise vê quem tem head = Marlon, Gustavo ou Fernanda (heads que reportam a ela)
+        DENISE_HEADS = {"marlon silva", "gustavo fabro", "fernanda santaniello", "denise mussolin"}
+        pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
+                            if hd in DENISE_HEADS}
     elif head_filter == "__none__":
         squads_visiveis = set()
         pessoas_visiveis = None
@@ -735,9 +738,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         deals_tl   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id_tl)] if qual_id_tl else []
         valor_tl   = sum(float(d.get("value") or 0) for d in deals_tl)
         valor_multi_tl = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_tl)
-        # Evita duplicata
-        nomes_ja_no_squad = {norm(s["nome"]) for s in get_squad(sub)["sdrs_ind"]}
-        if nn in nomes_ja_no_squad: continue
+        # Evita duplicata em qualquer squad
+        nomes_ja_em_qualquer_squad = {norm(s["nome"]) for sq2 in squads.values() for s in sq2["sdrs_ind"]}
+        if nn in nomes_ja_em_qualquer_squad: continue
         get_squad(sub)["sdrs_ind"].append({
             "nome": uname, "subarea": sub,
             "lider": uname,
@@ -1536,7 +1539,10 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
         pessoas_visiveis = None
     elif head_filter == "__denise__":
         squads_visiveis = DENISE_SQUADS_VISIVEIS
-        pessoas_visiveis = None
+        # Denise vê quem tem head = Marlon, Gustavo ou Fernanda (heads que reportam a ela)
+        DENISE_HEADS = {"marlon silva", "gustavo fabro", "fernanda santaniello", "denise mussolin"}
+        pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
+                            if hd in DENISE_HEADS}
     elif head_filter == "__none__":
         squads_visiveis = set()
     elif head_filter.startswith("__squad__:"):
