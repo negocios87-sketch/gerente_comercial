@@ -446,10 +446,26 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
     nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
 
+    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+    nome_to_lider = {}
+    if lider_col:
+        for _, row in colab_df.iterrows():
+            nn  = norm(str(row.get(nome_col, "")))
+            lid = norm(str(row.get(lider_col, "")))
+            nome_to_lider[nn] = lid
+
+    lider_filter_nn = None  # nome normalizado do líder, quando filtro é __lider__
+
     if head_filter is None:
         squads_visiveis = None
     elif head_filter == "__none__":
         squads_visiveis = set()
+    elif head_filter.startswith("__lider__:"):
+        lider_filter_nn = norm(head_filter.replace("__lider__:", ""))
+        # Squad do líder
+        lider_sub = next((sub for nn, sub in nome_to_subarea.items()
+                          if nn == lider_filter_nn and sub), None)
+        squads_visiveis = {norm(lider_sub)} if lider_sub else set()
     elif head_filter.startswith("__squad__:"):
         sub_direto = norm(head_filter.replace("__squad__:", ""))
         squads_visiveis = {sub_direto}
@@ -460,8 +476,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             if norm(nome_to_head.get(nn, "")) == head_nn and sub
         )
 
-    def visivel(sub):
-        return squads_visiveis is None or norm(sub) in squads_visiveis
+    def visivel(sub, nome_nn=None):
+        if squads_visiveis is None: return True
+        if not squads_visiveis: return False
+        if norm(sub) not in squads_visiveis: return False
+        # Filtro de líder: só mostra membros cujo líder = lider_filter_nn
+        if lider_filter_nn and nome_nn:
+            return nome_to_lider.get(nome_nn) == lider_filter_nn or nome_nn == lider_filter_nn
+        return True
 
     closer_real = {}        # nn -> {valor, valor_multi, qtd}
     denise_por_squad = {}  # squad_display -> {valor, valor_multi, qtd}
@@ -614,7 +636,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     for uid, uname in users_pipe.items():
         nn      = norm(uname)
         own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
+        if not own_sub or not visivel(own_sub, nn): continue
         if nn not in closer_real: continue
         is_head_of    = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
         is_lider_of   = nn in lider_nomes and nn not in team_leaders
@@ -633,7 +655,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     for m in sdrs_metas:
         nn  = m["nome_norm"]
         sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
+        if not sub or not visivel(sub, nn): continue
         meta_reu = m["meta_reu"]
         meta_fin = m["meta_fin"]
         uid      = nome_norm_to_uid.get(nn)
@@ -937,7 +959,7 @@ def api_abril():
                                 lider_sub = sub
                                 is_lider = True
                             break
-                head_filter = f"__squad__:{lider_sub}" if is_lider and lider_sub else "__none__"
+                head_filter = f"__lider__:{nome_sess}" if is_lider else "__none__"
         return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano, head_filter=head_filter)))
     except Exception as e:
         import traceback
@@ -1052,6 +1074,13 @@ def calcular_forecast(head_filter=None):
     if head_filter and not head_filter.startswith("__"):
         head_nn = norm(head_filter)
         squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items() if norm(nome_to_head.get(nn, "")) == head_nn and sub}
+    elif head_filter and head_filter.startswith("__lider__:"):
+        lider_nn_ext = norm(head_filter.replace("__lider__:", ""))
+        lider_col_ext = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
+        lider_sub_ext = next((str(row.get(next((c for c in colab_df.columns if norm(c)=="subarea"), ""), "")).strip()
+                              for _, row in colab_df.iterrows()
+                              if norm(str(row.get(next((c for c in colab_df.columns if norm(c)=="nome"), "Nome"), ""))) == lider_nn_ext), None)
+        squads_visiveis = {norm(lider_sub_ext)} if lider_sub_ext else set()
     elif head_filter and head_filter.startswith("__squad__:"):
         squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
     else:
@@ -1224,7 +1253,7 @@ def api_forecast():
                         if norm(str(row.get(lider_col,""))) == norm(nome_sess):
                             lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
                             break
-                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+                head_filter = f"__lider__:{nome_sess}" if lider_sub else "__none__"
         return jsonify(limpar_nans(calcular_forecast(head_filter=head_filter)))
     except Exception as e:
         import traceback
@@ -1726,7 +1755,7 @@ def api_forecast_reunioes():
                         if norm(str(row.get(lider_col,""))) == norm(nome_sess):
                             lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
                             break
-                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+                head_filter = f"__lider__:{nome_sess}" if lider_sub else "__none__"
         return jsonify(limpar_nans(calcular_forecast_reunioes(mes=mes, ano=ano, head_filter=head_filter)))
     except Exception as e:
         import traceback
@@ -1906,7 +1935,7 @@ def api_overview():
                         if norm(str(row.get(lider_col,""))) == norm(nome_sess):
                             lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
                             break
-                head_filter = f"__squad__:{lider_sub}" if lider_sub else "__none__"
+                head_filter = f"__lider__:{nome_sess}" if lider_sub else "__none__"
 
         # Verifica se é a Denise (head de Sniper+Elite+Olympus) para mostrar consolidado
         DENISE_HEADS = {"denise mussolin"}
