@@ -732,6 +732,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if not sub or not visivel(sub, nn): continue
         if nn in sdr_nomes_ja: continue
         if nn not in team_leaders_set: continue
+        if nn in EXCLUIR_REU_SDR: continue  # ex: Denise — não aparece como SDR
         uid_str = str(uid)
         acts_tl  = acts_by_owner.get(uid_str, [])
         validadas_tl = [a for a in acts_tl if act_valida(a, sub)]
@@ -1229,8 +1230,10 @@ def calcular_forecast(head_filter=None, mes=None, ano=None):
                 c = d["closers"][owner_name]
                 d["realizado"] += valor
                 c["realizado"] += valor
+    SQUADS_SEM_CLOSER = {"sniper"}  # squads 100% SDR, sem closers no forecast
     result = {}
     for squad, days in by_squad.items():
+        if norm(squad) in SQUADS_SEM_CLOSER: continue
         rows = []
         for dt in sorted(days.keys()):
             d = days[dt]
