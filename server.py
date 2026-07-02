@@ -470,10 +470,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         pessoas_visiveis = None
     elif head_filter == "__denise__":
         squads_visiveis = DENISE_SQUADS_VISIVEIS
-        # Lê dinamicamente do COLAB quem reporta à Denise (independe do mês)
         denise_nn = "denise mussolin"
         # Heads diretos da Denise = quem tem head = Denise no COLAB
         heads_da_denise = {nn for nn, hd in nome_to_head.items() if hd == denise_nn}
+        # Inclui também heads auto-referenciados dentro dos squads da Denise
+        # (ex: Marlon Silva que tem head = si mesmo mas gerencia Sniper)
+        heads_da_denise |= {nn for nn, sub in nome_to_subarea.items()
+                            if norm(sub) in DENISE_SQUADS_VISIVEIS
+                            and nome_to_head.get(nn) == nn}
         # Pessoas visíveis = quem tem head = um desses heads OU head = Denise OU é a Denise
         pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
                             if hd in heads_da_denise or hd == denise_nn or nn == denise_nn}
@@ -834,6 +838,17 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "ticket_medio": arred(safe_div(t_ganho, t_qtd)) if t_qtd else 0,
             "pct_final": arred(pct_r * PESO_REU + pct_g * PESO_FIN),
         }
+
+    # Dedup final: remove SDRs duplicados por nome em cada squad
+    for sub, sq in squads.items():
+        seen_sdrs = set()
+        deduped = []
+        for s in sq["sdrs_ind"]:
+            nn_s = norm(s["nome"])
+            if nn_s not in seen_sdrs:
+                seen_sdrs.add(nn_s)
+                deduped.append(s)
+        sq["sdrs_ind"] = deduped
 
     squads_final = {}
     lic_closers = []
@@ -1569,10 +1584,14 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
         pessoas_visiveis = None
     elif head_filter == "__denise__":
         squads_visiveis = DENISE_SQUADS_VISIVEIS
-        # Lê dinamicamente do COLAB quem reporta à Denise (independe do mês)
         denise_nn = "denise mussolin"
         # Heads diretos da Denise = quem tem head = Denise no COLAB
         heads_da_denise = {nn for nn, hd in nome_to_head.items() if hd == denise_nn}
+        # Inclui também heads auto-referenciados dentro dos squads da Denise
+        # (ex: Marlon Silva que tem head = si mesmo mas gerencia Sniper)
+        heads_da_denise |= {nn for nn, sub in nome_to_subarea.items()
+                            if norm(sub) in DENISE_SQUADS_VISIVEIS
+                            and nome_to_head.get(nn) == nn}
         # Pessoas visíveis = quem tem head = um desses heads OU head = Denise OU é a Denise
         pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
                             if hd in heads_da_denise or hd == denise_nn or nn == denise_nn}
