@@ -39,6 +39,7 @@ DENISE_NORM      = "denise mussolin"   # nome normalizado da Denise
 # Mapeamento funil → squad display (para distribuir vendas da Denise)
 FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus", "navigator": "Olympus"}
 EXCLUIR_REU_CLOSER = {"matheus paz"}  # responsavel ignorado nas reunioes de closer
+EXCLUIR_REU_SDR    = {"denise mussolin"}  # ignorados como SDR mesmo que façam reuniões
 SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
 
 # Mapeamento de nomes de exibição (cosmético)
@@ -679,8 +680,11 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
         acts_sdr = acts_by_owner.get(uid_str, [])
 
-        validadas     = [a for a in acts_sdr if act_valida(a, sub)]
-        qtd_val       = len(validadas)
+        if norm(m["nome"]) in EXCLUIR_REU_SDR:
+            validadas = []
+        else:
+            validadas = [a for a in acts_sdr if act_valida(a, sub)]
+        qtd_val = len(validadas)
         deveria_estar = arred(safe_div(meta_reu, du_total) * du_pass)
         pct_reu       = arred(safe_div(qtd_val, meta_reu) * 100)
         qual_id       = qual_ids.get(nn)
@@ -1119,10 +1123,12 @@ def buscar_deals_ganhos_todos(mes=None, ano=None):
         start += 500
     return todos
 
-def calcular_forecast(head_filter=None):
+def calcular_forecast(head_filter=None, mes=None, ano=None):
     from collections import defaultdict
     hoje_fc = date.today()
-    colab_df  = buscar_colaboradores(mes=hoje_fc.month, ano=hoje_fc.year)
+    mes_fc  = mes or hoje_fc.month
+    ano_fc  = ano or hoje_fc.year
+    colab_df  = buscar_colaboradores(mes=mes_fc, ano=ano_fc)
     sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
     nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
     head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
@@ -1303,6 +1309,8 @@ def api_forecast():
         superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
         if norm(nome_sess) in superusers:
             head_filter = None
+        elif norm(nome_sess) == DENISE_NORM:
+            head_filter = "__denise__"
         else:
             colab_df = buscar_colaboradores()
             head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
@@ -1381,11 +1389,12 @@ def calcular_snapshot():
             result[squad][dt] = dict(closers)
     return result
 
-def enriquecer_snapshot(snapshot_data):
+def enriquecer_snapshot(snapshot_data, mes=None, ano=None):
     from collections import defaultdict
 
     # Usa calcular_forecast para pegar os ganhos reais — mesma lógica do Forecast Diário
-    fc_data = calcular_forecast(head_filter=None)
+    # Passa mes/ano do snapshot para pegar composição correta
+    fc_data = calcular_forecast(head_filter=None, mes=mes, ano=ano)
     fc_squads = fc_data.get("squads", {})
 
     # Monta ganhos_reais[squad][dia][closer] = valor a partir do forecast
@@ -1485,7 +1494,13 @@ def api_historico():
             content_str, _ = github_get_file(f"snapshots/{fname}.json")
             if content_str:
                 snap = json.loads(content_str)
-                result[fname] = enriquecer_snapshot(snap)
+                # Extrai mes/ano do nome do arquivo (ex: 2026-06-15)
+                try:
+                    parts = fname.split("-")
+                    snap_ano = int(parts[0]); snap_mes = int(parts[1])
+                except:
+                    snap_ano = None; snap_mes = None
+                result[fname] = enriquecer_snapshot(snap, mes=snap_mes, ano=snap_ano)
         return jsonify(limpar_nans({"snapshots": result, "datas": files, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}))
     except Exception as e:
         import traceback
@@ -1814,6 +1829,8 @@ def api_forecast_reunioes():
         superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
         if norm(nome_sess) in superusers:
             head_filter = None
+        elif norm(nome_sess) == DENISE_NORM:
+            head_filter = "__denise__"
         else:
             colab_df = buscar_colaboradores()
             head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
@@ -1994,6 +2011,8 @@ def api_overview():
 
         if norm(nome_sess) in superusers:
             head_filter = None
+        elif norm(nome_sess) == DENISE_NORM:
+            head_filter = "__denise__"
         else:
             colab_df = buscar_colaboradores()
             head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
