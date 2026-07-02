@@ -466,10 +466,13 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         pessoas_visiveis = None
     elif head_filter == "__denise__":
         squads_visiveis = DENISE_SQUADS_VISIVEIS
-        # Denise vê quem tem head = Marlon, Gustavo ou Fernanda (heads que reportam a ela)
-        DENISE_HEADS = {"marlon silva", "gustavo fabro", "fernanda santaniello", "denise mussolin"}
+        # Lê dinamicamente do COLAB quem reporta à Denise (independe do mês)
+        denise_nn = "denise mussolin"
+        # Heads diretos da Denise = quem tem head = Denise no COLAB
+        heads_da_denise = {nn for nn, hd in nome_to_head.items() if hd == denise_nn}
+        # Pessoas visíveis = quem tem head = um desses heads OU head = Denise OU é a Denise
         pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
-                            if hd in DENISE_HEADS}
+                            if hd in heads_da_denise or hd == denise_nn or nn == denise_nn}
     elif head_filter == "__none__":
         squads_visiveis = set()
         pessoas_visiveis = None
@@ -1557,10 +1560,13 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
         pessoas_visiveis = None
     elif head_filter == "__denise__":
         squads_visiveis = DENISE_SQUADS_VISIVEIS
-        # Denise vê quem tem head = Marlon, Gustavo ou Fernanda (heads que reportam a ela)
-        DENISE_HEADS = {"marlon silva", "gustavo fabro", "fernanda santaniello", "denise mussolin"}
+        # Lê dinamicamente do COLAB quem reporta à Denise (independe do mês)
+        denise_nn = "denise mussolin"
+        # Heads diretos da Denise = quem tem head = Denise no COLAB
+        heads_da_denise = {nn for nn, hd in nome_to_head.items() if hd == denise_nn}
+        # Pessoas visíveis = quem tem head = um desses heads OU head = Denise OU é a Denise
         pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
-                            if hd in DENISE_HEADS}
+                            if hd in heads_da_denise or hd == denise_nn or nn == denise_nn}
     elif head_filter == "__none__":
         squads_visiveis = set()
     elif head_filter.startswith("__squad__:"):
