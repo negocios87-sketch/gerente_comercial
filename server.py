@@ -729,6 +729,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             if nn_row == lid_row and nn_row:
                 team_leaders_set.add(nn_row)
 
+    # Set global para evitar duplicatas no bloco TL — atualizado após cada append
+    nomes_tl_adicionados = {norm(s["nome"]) for sq2 in squads.values() for s in sq2["sdrs_ind"]}
+
     for uid, uname in users_pipe.items():
         nn  = norm(uname)
         sub = nome_to_subarea.get(nn, "")
@@ -736,6 +739,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         if nn in sdr_nomes_ja: continue
         if nn not in team_leaders_set: continue
         if nn in EXCLUIR_REU_SDR: continue  # ex: Denise — não aparece como SDR
+        if nn in nomes_tl_adicionados: continue  # evita duplicata
         uid_str = str(uid)
         acts_tl  = acts_by_owner.get(uid_str, [])
         validadas_tl = [a for a in acts_tl if act_valida(a, sub)]
@@ -746,9 +750,6 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         deals_tl   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id_tl)] if qual_id_tl else []
         valor_tl   = sum(float(d.get("value") or 0) for d in deals_tl)
         valor_multi_tl = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_tl)
-        # Evita duplicata em qualquer squad
-        nomes_ja_em_qualquer_squad = {norm(s["nome"]) for sq2 in squads.values() for s in sq2["sdrs_ind"]}
-        if nn in nomes_ja_em_qualquer_squad: continue
         get_squad(sub)["sdrs_ind"].append({
             "nome": uname, "subarea": sub,
             "lider": uname,
@@ -761,6 +762,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "pct_ganhos": 0, "ticket_medio": arred(safe_div(valor_tl, len(deals_tl))) if deals_tl else 0,
             "pct_final": 0,
         })
+        nomes_tl_adicionados.add(nn)
     for uid, uname in users_pipe.items():
         nn = norm(uname)
         if nn not in lider_nomes and nn not in team_leaders: continue
