@@ -140,6 +140,10 @@ def buscar_colaboradores(mes=None, ano=None):
             except: return 0
         mask = (df[mes_col].apply(to_int) == mes) & (df[ano_col].apply(to_int) == ano)
         df = df[mask].copy() if not df.empty else df
+        # Deduplica por nome — remove linhas duplicadas do mesmo mês
+        nome_col_d = next((c for c in df.columns if norm(c) == "nome"), None)
+        if nome_col_d:
+            df = df.drop_duplicates(subset=[nome_col_d], keep="first")
         if df.empty:
             df = ler_sheet(URL_COLAB)
             df.columns = [c.strip() for c in df.columns]
@@ -1235,10 +1239,8 @@ def calcular_forecast(head_filter=None, mes=None, ano=None):
                 c = d["closers"][owner_name]
                 d["realizado"] += valor
                 c["realizado"] += valor
-    SQUADS_SEM_CLOSER = {"sniper"}  # squads 100% SDR, sem closers no forecast
     result = {}
     for squad, days in by_squad.items():
-        if norm(squad) in SQUADS_SEM_CLOSER: continue
         rows = []
         for dt in sorted(days.keys()):
             d = days[dt]
@@ -1336,7 +1338,12 @@ def api_forecast():
                             lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
                             break
                 head_filter = f"__lider__:{nome_sess}" if lider_sub else "__none__"
-        return jsonify(limpar_nans(calcular_forecast(head_filter=head_filter)))
+        fc = calcular_forecast(head_filter=head_filter)
+        # Remove squads 100% SDR do Forecast Diário
+        SQUADS_SEM_CLOSER = {"sniper"}
+        fc["squads"] = {k: v for k, v in fc.get("squads", {}).items()
+                        if norm(k) not in SQUADS_SEM_CLOSER}
+        return jsonify(limpar_nans(fc))
     except Exception as e:
         import traceback
         return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
