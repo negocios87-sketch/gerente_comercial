@@ -839,15 +839,19 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "pct_final": arred(pct_r * PESO_REU + pct_g * PESO_FIN),
         }
 
-    # Dedup final: remove SDRs duplicados por nome em cada squad
+    # Dedup + filtro final por pessoas_visiveis
     for sub, sq in squads.items():
         seen_sdrs = set()
         deduped = []
         for s in sq["sdrs_ind"]:
             nn_s = norm(s["nome"])
-            if nn_s not in seen_sdrs:
-                seen_sdrs.add(nn_s)
-                deduped.append(s)
+            if nn_s in seen_sdrs:
+                continue
+            # Se há filtro de pessoas, garante que só passam os visíveis
+            if pessoas_visiveis is not None and nn_s not in pessoas_visiveis:
+                continue
+            seen_sdrs.add(nn_s)
+            deduped.append(s)
         sq["sdrs_ind"] = deduped
 
     squads_final = {}
