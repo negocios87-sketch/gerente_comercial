@@ -883,13 +883,26 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     total_geral_c   = total_closers(all_closers_ind)
     total_geral_s   = total_sdrs(all_sdrs_ind)
 
+    # Squads 100% SDR (sem closers no resultado) e 100% Closer (sem SDR no resultado)
+    SQUADS_100_SDR_SET    = {"sniper"}
+    SQUADS_100_CLOSER_SET = {"elite", "olympus", "mgm", "latam", "orion"}
+
     squads_result = []
     for sub, sq in squads_final.items():
         tc = total_closers(sq["closers_ind"])
         ts = total_sdrs(sq["sdrs_ind"])
         ating_closer = tc["pct_atingido_multi"] if tc else 0
         ating_sdr    = ts["pct_final"] if ts else None
-        resultado    = arred((ating_closer + ating_sdr) / 2) if ating_sdr is not None else ating_closer
+        sub_norm = norm(display_squad(sub))
+        if sub_norm in SQUADS_100_SDR_SET:
+            # 100% SDR — resultado = pct_final_sdr
+            resultado = ating_sdr if ating_sdr is not None else 0
+        elif sub_norm in SQUADS_100_CLOSER_SET:
+            # 100% Closer — resultado = pct_atingido_closer
+            resultado = ating_closer
+        else:
+            # Misto — média
+            resultado = arred((ating_closer + ating_sdr) / 2) if ating_sdr is not None else ating_closer
         squads_result.append({
             "nome": display_squad(sq.get("nome", sub)),
             "ating_closer": arred(ating_closer),
@@ -925,10 +938,18 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     DENISE_SQUADS = {"elite", "sniper", "mgm", "olympus"}
     denise_squads = [r for r in squads_result if norm(r["nome"]) in DENISE_SQUADS]
     if denise_squads:
-        d_closer = arred(safe_div(sum(sq["ating_closer"] for sq in denise_squads), len(denise_squads)))
-        d_sdr_vals = [sq["ating_sdr"] for sq in denise_squads if sq["ating_sdr"] is not None]
+        # Closer (Elite + Olympus) = 50% do resultado da Denise
+        closer_squads = [r for r in denise_squads if norm(r["nome"]) in {"elite", "olympus", "mgm"}]
+        d_closer = arred(safe_div(sum(sq["ating_closer"] for sq in closer_squads), len(closer_squads))) if closer_squads else 0
+        # SDR (Sniper) = 50% do resultado da Denise
+        sdr_squads = [r for r in denise_squads if norm(r["nome"]) == "sniper"]
+        d_sdr_vals = [sq["ating_sdr"] for sq in sdr_squads if sq["ating_sdr"] is not None]
         d_sdr = arred(sum(d_sdr_vals) / len(d_sdr_vals)) if d_sdr_vals else None
-        d_resultado = arred((d_closer + d_sdr) / 2) if d_sdr is not None else d_closer
+        # 50% closer + 50% SDR
+        if d_sdr is not None:
+            d_resultado = arred((d_closer + d_sdr) / 2)
+        else:
+            d_resultado = d_closer
         squads_result.append({
             "nome": "Denise Mussolin", "ating_closer": d_closer, "ating_sdr": d_sdr,
             "resultado": d_resultado, "tem_sdr": d_sdr is not None, "is_consolidated": True,
