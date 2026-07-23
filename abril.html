@@ -1162,12 +1162,13 @@ function fmtBRL(v) {
   return 'R$ ' + Number(v).toLocaleString('pt-BR', {maximumFractionDigits:0});
 }
 
-function criarGrafico(canvasId, squad, dias, metaTotal) {
+function criarGrafico(canvasId, squad, dias, metaTotal, isSdrSquad) {
   destroyChart(canvasId);
   const todayFull = new Date().toISOString().slice(0,10);
   const labels    = dias.map(d => d.dia.slice(8));
-  const metaLine  = dias.map(d => d.meta_mtd);
-  const realLine  = dias.map(d => d.real_mtd);
+  // SDR squads (Sniper): usa reuniões no gráfico
+  const metaLine  = isSdrSquad ? dias.map(d => d.meta_reu_mtd) : dias.map(d => d.meta_mtd);
+  const realLine  = isSdrSquad ? dias.map(d => d.reu_mtd)      : dias.map(d => d.real_mtd);
   const todayIdx  = dias.findIndex(d => d.dia === todayFull);
   const lastIdx   = dias.length - 1;
 
@@ -1374,12 +1375,12 @@ function renderOverview(data) {
 
   setTimeout(() => {
     [...row1entries, ...row2entries].forEach(([sq, sqData]) => {
-      criarGrafico('chart_' + sq.replace(/[^a-zA-Z0-9]/g,'_'), sq, sqData.dias, sqData.meta_total);
+      criarGrafico('chart_' + sq.replace(/[^a-zA-Z0-9]/g,'_'), sq, sqData.dias, sqData.meta_total, sqData.is_sdr_squad);
     });
     // Single squad fallback
     if (allRegular.length === 0) {
       Object.entries(squads).filter(([k]) => k !== '__TOTAL__' && k !== '__DENISE__').forEach(([sq, sqData]) => {
-        criarGrafico('chart_' + sq.replace(/[^a-zA-Z0-9]/g,'_'), sq, sqData.dias, sqData.meta_total);
+        criarGrafico('chart_' + sq.replace(/[^a-zA-Z0-9]/g,'_'), sq, sqData.dias, sqData.meta_total, sqData.is_sdr_squad);
       });
     }
     if (isDenise && denise) criarGrafico('chart___DENISE__', 'Consolidado Denise', denise.dias, denise.meta_total);
