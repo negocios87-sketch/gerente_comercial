@@ -510,9 +510,23 @@ function renderSdrs(sdrs, total, squadIdx, squadNome) {
 // ── RESULTADO CARDS ───────────────────────────────────────────
 function renderResultados(resultados) {
   if (!resultados || !resultados.length) return '';
-  const cards = resultados.map(r => `
+  const SQUADS_100_SDR    = ['sniper'];
+  const SQUADS_100_CLOSER = ['olympus', 'elite', 'latam', 'orion', 'mgm'];
+  const EXCLUIR_CARD      = ['inteligência comercial', 'inteligencia comercial'];
+  const normStr = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+
+  const cards = resultados
+    .filter(r => !EXCLUIR_CARD.some(e => normStr(r.nome).includes(normStr(e))))
+    .map(r => {
+      const nomeNorm = normStr(r.nome);
+      const is100SDR    = SQUADS_100_SDR.some(s => nomeNorm.includes(s));
+      const is100Closer = SQUADS_100_CLOSER.some(s => nomeNorm.includes(s));
+      const showCloser = r.tem_closer !== false && !is100SDR;
+      const showSdr    = r.tem_sdr && !is100Closer;
+      return `
     <div class="result-card${r.is_consolidated ? ' result-card-consolidated' : ''}${r.is_total_geral ? ' result-card-total-geral' : ''}">
       <div class="rc-nome">${r.nome}${r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' : ''}${r.is_total_geral ? ' <span class="badge-lider" style="background:var(--navy);color:var(--gold);border-color:var(--navy)">TOTAL</span>' : ''}</div>
+      ${showCloser ? `
       <div class="rc-section-label">Closers</div>
       <div class="rc-row"><span class="rc-label">Meta</span><span class="rc-val">${R(r.closer_meta)}</span></div>
       <div class="rc-row"><span class="rc-label">MTD</span><span class="rc-val">${R(r.closer_mtd)}</span></div>
@@ -521,8 +535,9 @@ function renderResultados(resultados) {
       <div class="rc-row"><span class="rc-label">Bruto</span><span class="rc-val">${R(r.closer_bruto)}</span></div>
       <div class="rc-row"><span class="rc-label">Multiplicador</span><span class="rc-val-multi">${R(r.closer_multi)}</span></div>
       <div class="rc-row"><span class="rc-label">Vol. Ganhos</span><span class="rc-val">${N(r.closer_vol)}</span></div>
-      ${r.closer_refs > 0 ? `<div class="rc-row"><span class="rc-label" style="color:#C2500A">Referidos</span><span class="rc-val" style="color:#C2500A">${N(r.closer_refs)}</span></div>` : ''}
-      ${r.tem_sdr ? `
+      ${r.closer_refs > 0 ? \`<div class="rc-row"><span class="rc-label" style="color:#C2500A">Referidos</span><span class="rc-val" style="color:#C2500A">${N(r.closer_refs)}</span></div>\` : ''}
+      ` : ''}
+      ${showSdr ? `
       <div class="rc-section-label" style="margin-top:8px">SDR's</div>
       <div class="rc-row"><span class="rc-label">Meta Reunião</span><span class="rc-val">${N(r.sdr_meta_reu)}</span></div>
       <div class="rc-row"><span class="rc-label">Meta Financeira</span><span class="rc-val">${R(r.sdr_meta_fin)}</span></div>
@@ -532,7 +547,8 @@ function renderResultados(resultados) {
       <div class="rc-row"><span class="rc-label">Reuniões Valid.</span><span class="rc-val">${N(r.sdr_reunioes)}</span></div>` : ''}
       <div class="rc-total"><span>Resultado</span><span>${pctBadge(r.resultado)}</span></div>
       <div class="rc-bar"><div class="rc-fill" style="width:${Math.min(r.resultado,100)}%;background:${barColor(r.resultado)}"></div></div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `<div class="section-title">Resultado por Squad</div><div class="resultados">${cards}</div>`;
 }
 
