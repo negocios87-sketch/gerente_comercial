@@ -887,8 +887,10 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     SQUADS_100_SDR_SET    = {"sniper"}
     SQUADS_100_CLOSER_SET = {"elite", "olympus", "mgm", "latam", "orion"}
 
+    EXCLUIR_CARDS = {"inteligencia comercial", "inteligência comercial", "int. comercial"}
     squads_result = []
     for sub, sq in squads_final.items():
+        if norm(display_squad(sub)) in EXCLUIR_CARDS: continue
         tc = total_closers(sq["closers_ind"])
         ts = total_sdrs(sq["sdrs_ind"])
         ating_closer = tc["pct_atingido_multi"] if tc else 0
@@ -903,12 +905,15 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         else:
             # Misto — média
             resultado = arred((ating_closer + ating_sdr) / 2) if ating_sdr is not None else ating_closer
+        tem_closer_flag = sub_norm not in SQUADS_100_SDR_SET
+        tem_sdr_flag    = ts is not None and sub_norm not in SQUADS_100_CLOSER_SET
         squads_result.append({
             "nome": display_squad(sq.get("nome", sub)),
             "ating_closer": arred(ating_closer),
             "ating_sdr": arred(ating_sdr) if ating_sdr is not None else None,
             "resultado": arred(resultado),
-            "tem_sdr": ts is not None,
+            "tem_sdr": tem_sdr_flag,
+            "tem_closer": tem_closer_flag,
             "closer_meta":    arred(tc["meta"]) if tc else 0,
             "closer_mtd":     arred(tc["mtd"]) if tc else 0,
             "closer_pct_mtd": arred(tc["pct_mtd"]) if tc else 0,
@@ -1994,6 +1999,32 @@ def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
     SQUADS_TOTAL_DISPLAY = {display_squad(s) for s in SQUADS_TOTAL_OVERVIEW} | SQUADS_TOTAL_OVERVIEW
     all_squads = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
 
+    # Para Sniper (100% SDR): busca reuniões por dia
+    SQUAD_SDR_OV = {"sniper"}
+    reu_dia_sniper = defaultdict(int)  # dia -> reuniões validadas acumuláveis
+    meta_reu_sniper = 0.0
+    if any(norm(sq) in SQUAD_SDR_OV for sq in all_squads):
+        acts_ov   = buscar_activities_mes(mes, ano)
+        dv_ov, mo_ov = buscar_deals_rv_mes(mes, ano)
+        metas_ov  = buscar_metas_todas(ano, mes)
+        meta_reu_sniper = sum(m["meta_reu"] for m in metas_ov
+                              if norm(nome_to_subarea.get(m["nome_norm"], "")) == "sniper"
+                              and m["meta_reu"] > 0)
+        for act in acts_ov:
+            if not (act.get("done") is True or act.get("status") == "done"): continue
+            due = str(act.get("due_date", "") or "")[:10]
+            if not due: continue
+            act_owner = str(act.get("owner_id", ""))
+            deal_id   = act.get("deal_id")
+            deal_owner = str(mo_ov.get(deal_id, "")) if deal_id else ""
+            if act_owner and deal_owner and act_owner == deal_owner: continue
+            if deal_id and deal_id not in dv_ov: continue
+            # Verifica se é SDR do Sniper
+            owner_nn = uid_to_norm_ov.get(int(act_owner), "") if act_owner.isdigit() else ""
+            if not owner_nn: continue
+            if norm(nome_to_subarea.get(owner_nn, "")) != "sniper": continue
+            reu_dia_sniper[due] += 1
+
     for squad in all_squads:
         if norm(squad) in SQUADS_EXCLUIR_OVERVIEW or squad.lower() in SQUADS_EXCLUIR_OVERVIEW:
             continue
@@ -2004,12 +2035,19 @@ def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
                 ganhos_total[dia] += ganhos_dia[squad].get(dia, 0.0)
         dias = []
         real_acum = 0.0
+        reu_acum  = 0
+        is_sdr_squad = norm(squad) in SQUAD_SDR_OV
+        meta_reu_sq  = meta_reu_sniper if is_sdr_squad else 0
         for dia in todos_dias:
             real_acum += ganhos_dia[squad].get(dia, 0.0)
+            reu_acum  += reu_dia_sniper.get(dia, 0) if is_sdr_squad else 0
             du_ate   = du_acum.get(dia, 0)
             meta_mtd = arred(safe_div(meta, du_total) * du_ate) if du_total else 0
-            dias.append({"dia": dia, "meta_mtd": meta_mtd, "real_mtd": arred(real_acum)})
-        result[squad] = {"dias": dias, "meta_total": arred(meta)}
+            meta_reu_mtd = arred(safe_div(meta_reu_sq, du_total) * du_ate) if du_total and is_sdr_squad else None
+            dias.append({"dia": dia, "meta_mtd": meta_mtd, "real_mtd": arred(real_acum),
+                         "meta_reu_mtd": meta_reu_mtd, "reu_mtd": reu_acum if is_sdr_squad else None})
+        result[squad] = {"dias": dias, "meta_total": arred(meta),
+                         "is_sdr_squad": is_sdr_squad, "meta_reu_total": arred(meta_reu_sq) if is_sdr_squad else None}
 
     # Consolidado Denise (Sniper + Elite + Olympus)
     DENISE_OV = ["Sniper", "Elite", "Olympus"]
