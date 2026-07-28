@@ -1741,10 +1741,22 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
     ultimo_dia = cal_mod.monthrange(ano, mes)[1]
     all_days = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
 
+    # Meta de reuniões por squad (definida antes do loop para ter du_total disponível)
+    # du_total calculado antecipadamente para uso nas metas diárias
+    feriados_fr  = buscar_feriados()
+    du_total_fr  = du_mes_total(ano, mes, feriados_fr)
+    meta_reu_por_squad = defaultdict(float)
+    for m in sdrs_metas:
+        nn  = m["nome_norm"]
+        sub = nome_to_subarea.get(nn, "")
+        if not sub: continue
+        sub_display_m = "Licenciados" if sub.upper().startswith("LIC") else sub
+        meta_reu_por_squad[sub_display_m] += m["meta_reu"]
+
     result = {}
     for sub_display, days in by_squad.items():
         meta_reu_squad = meta_reu_por_squad.get(sub_display, 0)
-        meta_diaria_squad = arred(safe_div(meta_reu_squad, du_total)) if du_total else 0
+        meta_diaria_squad = arred(safe_div(meta_reu_squad, du_total_fr)) if du_total_fr else 0
         rows = []
         # Inclui todos os dias do mês que tenham dados
         dias_com_dados = sorted(days.keys())
@@ -1945,15 +1957,6 @@ def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
     du_total   = du_mes_total(ano, mes, feriados)
     ultimo_dia = cal_mod.monthrange(ano, mes)[1]
     todos_dias = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
-
-    # Meta de reuniões por squad (soma dos SDRs do squad / du_total)
-    meta_reu_por_squad = defaultdict(float)
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub: continue
-        sub_display_m = "Licenciados" if sub.upper().startswith("LIC") else sub
-        meta_reu_por_squad[sub_display_m] += m["meta_reu"]
 
     du_acum = {}
     count = 0
