@@ -1741,8 +1741,19 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
     ultimo_dia = cal_mod.monthrange(ano, mes)[1]
     all_days = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
 
+    # Meta de reuniões por squad (soma dos SDRs do squad / du_total)
+    meta_reu_por_squad = defaultdict(float)
+    for m in sdrs_metas:
+        nn  = m["nome_norm"]
+        sub = nome_to_subarea.get(nn, "")
+        if not sub: continue
+        sub_display_m = "Licenciados" if sub.upper().startswith("LIC") else sub
+        meta_reu_por_squad[sub_display_m] += m["meta_reu"]
+
     result = {}
     for sub_display, days in by_squad.items():
+        meta_reu_squad = meta_reu_por_squad.get(sub_display, 0)
+        meta_diaria_squad = arred(safe_div(meta_reu_squad, du_total)) if du_total else 0
         rows = []
         # Inclui todos os dias do mês que tenham dados
         dias_com_dados = sorted(days.keys())
@@ -1785,15 +1796,18 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
             sdrs_list.sort(key=lambda x: -x["prevista"])
 
             rows.append({
-                "dia":         dia,
-                "prevista":    tot_prev,
-                "ag_no_dia":   tot_agnd,
-                "ag_p_outros": tot_agot,
-                "realizada":   tot_real,
-                "no_show":     tot_noshow,
-                "gap":         tot_gap,
-                "pct":         tot_pct,
-                "sdrs":        sdrs_list,
+                "dia":          dia,
+                "meta_diaria":  meta_diaria_squad,
+                "prevista":     tot_prev,
+                "ag_no_dia":    tot_agnd,
+                "ag_p_outros":  tot_agot,
+                "realizada":    tot_real,
+                "no_show":      tot_noshow,
+                "gap":          tot_gap,
+                "gap_meta":     max(0, meta_diaria_squad - tot_real),
+                "pct_meta":     arred(safe_div(tot_real, meta_diaria_squad) * 100) if meta_diaria_squad else None,
+                "pct":          tot_pct,
+                "sdrs":         sdrs_list,
             })
 
         # Total do squad
