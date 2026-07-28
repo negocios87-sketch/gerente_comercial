@@ -609,9 +609,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
     du_total = du_sheet if du_sheet > 0 else du_calc
 
+    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
     closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0
                       and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
-    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
     sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0
                      and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
 
@@ -2341,9 +2341,9 @@ def calcular_ranking(mes=None, ano=None):
 
     closers_list = []
     sdrs_list    = []
+    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
     closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0
                       and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
-    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
     sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0
                      and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
 
