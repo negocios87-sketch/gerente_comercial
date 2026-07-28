@@ -987,8 +987,8 @@ function resumoFrRow(label, r, highlight) {
     <td class="col-fc" style="color:var(--text-muted)">${N(r.ag_p_outros||0)}</td>
     <td class="col-fc" style="color:var(--green)">${N(r.realizada||0)}</td>
     <td class="col-fc">${ns}</td>
-    <td class="col-fc">${N(r.gap||0)}</td>
-    <td class="col-fc">${gap25Cell}</td>
+    <td class="col-fc">${(r.prevista||0) > 0 ? ((r.realizada||0) < (r.prevista||0) ? `<span style="color:var(--red)">${N((r.prevista||0)-(r.realizada||0))}</span>` : `<span style="color:var(--green)">0</span>`) : '—'}</td>
+    <td class="col-fc">${(r.prevista||0) > 0 ? pctBadgeFc(arred((r.realizada||0)/(r.prevista||0)*100)) : '—'}</td>
   </tr>`;
 }
 
@@ -1015,8 +1015,8 @@ function renderForecastReunioes(data) {
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. p/ Outros</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Realizada</th>
           <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">No Show</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Gap</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">GAP 25</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">GAP META</th>
+          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">% GAP META</th>
         </tr></thead>
         <tbody>
           ${resumo.time_denise ? resumoFrRow('🔶 Hoje — Time Denise', resumo.time_denise, true) : ''}
@@ -1049,8 +1049,8 @@ function renderForecastReunioes(data) {
         <td class="col-fc" style="color:var(--text-muted)">${N(row.ag_p_outros)}</td>
         <td class="col-fc" style="color:var(--green)">${N(row.realizada)}</td>
         <td class="col-fc">${nsCell}</td>
-        <td class="col-fc">${gapCell}</td>
-        <td class="col-fc">${pctCell}</td>
+        <td class="col-fc">${row.prevista > 0 ? (row.realizada < row.prevista ? `<span style="color:var(--red)">${N(row.prevista - row.realizada)}</span>` : `<span style="color:var(--green)">0</span>`) : '—'}</td>
+        <td class="col-fc">${row.prevista > 0 ? pctBadgeFc(arred(row.realizada / row.prevista * 100)) : '—'}</td>
       </tr>`;
 
       // SDR rows (visible by default)
@@ -1067,10 +1067,8 @@ function renderForecastReunioes(data) {
           <td class="col-fc" style="font-size:11px;color:var(--text-muted)">${N(s.ag_p_outros)}</td>
           <td class="col-fc" style="font-size:11px;color:var(--green)">${N(s.realizada)}</td>
           <td class="col-fc" style="font-size:11px">${sNs}</td>
-          <td class="col-fc" style="font-size:11px">${sGap}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--text-muted)">—</td>
-          <td class="col-fc" style="font-size:11px;color:var(--text-muted)">—</td>
-          <td class="col-fc" style="font-size:11px">${s.pct != null ? pctBadgeFc(s.pct) : '—'}</td>
+          <td class="col-fc" style="font-size:11px">${s.prevista > 0 ? (s.realizada < s.prevista ? `<span style="color:var(--red);font-size:11px">${N(s.prevista - s.realizada)}</span>` : `<span style="color:var(--green);font-size:11px">0</span>`) : '—'}</td>
+          <td class="col-fc" style="font-size:11px">${s.prevista > 0 ? pctBadgeFc(arred(s.realizada / s.prevista * 100)) : '—'}</td>
         </tr>`;
       });
     });
@@ -1084,10 +1082,8 @@ function renderForecastReunioes(data) {
       <td style="color:var(--text-muted)">${N(tot.ag_p_outros||0)}</td>
       <td style="color:var(--green);font-weight:700">${N(tot.realizada||0)}</td>
       <td>—</td>
-      <td>${tGap}</td>
-      <td style="color:var(--amber);font-weight:700">${tot.gap_25 != null ? N(tot.gap_25) : '—'}</td>
-      <td style="color:var(--amber);font-weight:700">${tot.pct_25 != null ? pctBadgeFc(tot.pct_25) : '—'}</td>
-      <td>${tot.pct!=null?pctBadgeFc(tot.pct):'—'}</td>
+      <td style="font-weight:700">${(tot.prevista||0) > 0 ? ((tot.realizada||0) < (tot.prevista||0) ? `<span style="color:var(--red);font-weight:700">${N((tot.prevista||0)-(tot.realizada||0))}</span>` : `<span style="color:var(--green);font-weight:700">0</span>`) : '—'}</td>
+      <td>${(tot.prevista||0) > 0 ? pctBadgeFc(arred((tot.realizada||0)/(tot.prevista||0)*100)) : '—'}</td>
     </tr>`;
 
     html += `
