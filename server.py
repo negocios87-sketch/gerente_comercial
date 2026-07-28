@@ -38,8 +38,8 @@ SQUADS_CRIADOR   = {"zenite"}
 DENISE_NORM      = "denise mussolin"   # nome normalizado da Denise
 # Mapeamento funil → squad display (para distribuir vendas da Denise)
 FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus", "navigator": "Olympus"}
-EXCLUIR_REU_CLOSER = {"matheus paz"}  # responsavel ignorado nas reunioes de closer
-EXCLUIR_REU_SDR    = {"denise mussolin"}  # ignorados como SDR mesmo que façam reuniões
+EXCLUIR_REU_CLOSER = {"matheus paz", "priscila ribeiro"}  # responsavel ignorado nas reunioes de closer
+EXCLUIR_REU_SDR    = {"denise mussolin", "priscila ribeiro"}  # ignorados como SDR
 SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
 
 # Mapeamento de nomes de exibição (cosmético)
@@ -609,8 +609,11 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
     du_total = du_sheet if du_sheet > 0 else du_calc
 
-    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
-    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
+    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0
+                      and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
+    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
+    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0
+                     and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
 
     def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False, refs=0, reu=0):
         mtd = safe_div(meta, du_total) * du_pass if du_total else 0
@@ -2338,8 +2341,11 @@ def calcular_ranking(mes=None, ano=None):
 
     closers_list = []
     sdrs_list    = []
-    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0]
-    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0]
+    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0
+                      and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
+    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
+    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0
+                     and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
 
     for m in closers_metas:
         nn  = m["nome_norm"]
