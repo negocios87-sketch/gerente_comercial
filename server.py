@@ -1817,14 +1817,20 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
         t_prev = sum(r["prevista"] for r in rows)
         t_real = sum(r["realizada"] for r in rows)
         t_pct  = arred(safe_div(t_real, t_prev) * 100) if t_prev > 0 else None
+        t_meta_diaria = meta_diaria_squad
+        t_gap_meta = max(0, t_meta_diaria * len(rows) - t_real) if t_meta_diaria else None
+        t_pct_meta = arred(safe_div(t_real, t_meta_diaria * len(rows)) * 100) if t_meta_diaria and rows else None
         result[sub_display] = {
             "rows": rows,
             "total": {
+                "meta_diaria": t_meta_diaria,
                 "prevista":    t_prev,
                 "ag_no_dia":   sum(r["ag_no_dia"] for r in rows),
                 "ag_p_outros": sum(r["ag_p_outros"] for r in rows),
                 "realizada":   t_real,
                 "gap":         t_prev - t_real,
+                "gap_meta":    t_gap_meta,
+                "pct_meta":    t_pct_meta,
                 "pct":         t_pct,
             }
         }
