@@ -1756,10 +1756,11 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
     result = {}
     for sub_display, days in by_squad.items():
         meta_reu_squad = meta_reu_por_squad.get(sub_display, 0)
-        meta_diaria_squad = arred(safe_div(meta_reu_squad, du_total_fr)) if du_total_fr else 0
+        meta_diaria_squad = math.ceil(safe_div(meta_reu_squad, du_total_fr)) if du_total_fr else 0
         rows = []
         # Inclui todos os dias do mês que tenham dados
-        dias_com_dados = sorted(days.keys())
+        mes_str = f"{ano}-{mes:02d}"
+        dias_com_dados = sorted(d for d in days.keys() if d.startswith(mes_str))
         for dia in dias_com_dados:
             sdrs_dia = days[dia]
             # Agrega totais do dia
