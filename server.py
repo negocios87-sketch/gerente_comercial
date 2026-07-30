@@ -669,7 +669,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         own_sub = nome_to_subarea.get(nn, "")
         if not own_sub or not visivel(own_sub, nn): continue
         if nn not in closer_real: continue
-        is_head_of    = any(norm(nome_to_head.get(n2, "")) == nn for n2 in nome_to_subarea)
+        is_head_of    = any(nome_to_head.get(n2, "") == nn for n2 in nome_to_subarea)
         is_lider_of   = nn in lider_nomes and nn not in team_leaders
         is_tl_sem_sdr = nn in team_leaders and norm(own_sub) in SQUADS_SEM_SDR
         if not is_head_of and not is_lider_of and not is_tl_sem_sdr: continue
