@@ -445,7 +445,8 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         nome_to_head[nn]    = norm(hd)
         nome_to_cargo[nn]   = cg
 
-    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
+    # team_leaders = quem tem lider == si mesmo (inclui heads, TLs, gerentes)
+    team_leaders = {nn for nn, lid in nome_to_lider.items() if lid == nn and nn}
     SQUADS_SEM_SDR = {"latam", "orion"}
 
     uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
@@ -976,7 +977,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         })
 
     # ── Card Total Geral (exclui Zenite e Licenciados) ──
-    EXCLUIR_GERAL = {"zenite", "licenciados"}
+    EXCLUIR_GERAL = {"zenite", "licenciados", "inteligencia comercial"}
     squads_para_geral = [r for r in squads_result
                          if norm(r["nome"]) not in EXCLUIR_GERAL
                          and not r.get("is_consolidated")]
