@@ -504,9 +504,10 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             norm(sub) for nn, sub in nome_to_subarea.items()
             if norm(nome_to_head.get(nn, "")) == head_nn and sub
         )
-        # Só pessoas cujo head = esse head
+        # Só pessoas cujo head = esse head + o próprio head
         pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
                             if hd == head_nn}
+        pessoas_visiveis.add(head_nn)  # inclui o próprio head
 
     def visivel(sub, nome_nn=None):
         if squads_visiveis is None: return True
