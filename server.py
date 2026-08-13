@@ -460,6 +460,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     # team_leaders: quem tem lider = si mesmo (heads, TLs, gerentes)
     team_leaders = {nn for nn, lid in nome_to_lider.items() if lid == nn and nn}
     lider_nomes  = set(nome_to_lider.values())
+    SQUADS_SEM_SDR = {"latam", "orion"}
 
     lider_filter_nn = None  # nome normalizado do líder, quando filtro é __lider__
 
