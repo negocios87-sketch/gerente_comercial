@@ -218,15 +218,8 @@ def buscar_pipelines():
     return {p["id"]: norm(p["name"]) for p in (resp.json().get("data") or [])}
 
 def squad_por_funil(deal, pipes):
-    """Se o deal for da Denise, retorna o squad pelo funil. Senão None."""
-    owner_nn = norm(get_owner_name(deal))
-    if not owner_nn:
-        return None
-    if owner_nn != DENISE_NORM:
-        return None
-    pipe_id   = deal.get("pipeline_id")
-    pipe_norm = pipes.get(pipe_id, "")
-    return FUNIL_SQUAD_MAP.get(pipe_norm)
+    """Denise agora tem subarea=Ascensão no COLAB — sem redistribuição por funil."""
+    return None
 
 def buscar_qual_ids():
     resp = req.get(f"{BASE_V1}/dealFields", params={"api_token": API_KEY}, timeout=15)
