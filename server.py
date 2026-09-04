@@ -37,20 +37,20 @@ URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadshe
 SQUADS_CRIADOR   = {"zenite"}
 DENISE_NORM      = "denise mussolin"   # nome normalizado da Denise
 # Mapeamento funil → squad display (para distribuir vendas da Denise)
-FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus", "navigator": "Olympus"}
+FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus", "navigator": "Ascensão"}
 EXCLUIR_REU_CLOSER = {"matheus paz", "priscila ribeiro"}  # responsavel ignorado nas reunioes de closer
 EXCLUIR_REU_SDR    = {"denise mussolin", "priscila ribeiro"}  # ignorados como SDR
 SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
 
 # Mapeamento de nomes de exibição (cosmético)
-SQUAD_DISPLAY = {"MGM": "Olympus", "mgm": "Olympus"}
+SQUAD_DISPLAY = {"MGM": "Olympus", "mgm": "Olympus", "Ascensão": "Ascensão", "ascensão": "Ascensão", "ascensao": "Ascensão", "Ascensao": "Ascensão"}
 def display_squad(nome):
     return SQUAD_DISPLAY.get(nome, SQUAD_DISPLAY.get(nome.strip(), nome))
 
 # Squads excluídos do Overview (Jacaré)
 SQUADS_EXCLUIR_OVERVIEW = {"licenciados"}
 # Squads incluídos no total do Overview
-SQUADS_TOTAL_OVERVIEW   = {"sniper", "elite", "mgm", "latam", "orion", "zenite"}
+SQUADS_TOTAL_OVERVIEW   = {"sniper", "elite", "mgm", "latam", "orion", "zenite", "ascensão", "ascensao"}
 
 # ── HELPERS ───────────────────────────────────────────────────
 def norm(s):
@@ -466,7 +466,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     pessoas_visiveis = None  # None = todos; set = só essas pessoas (por nome_norm)
 
-    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus"}
+    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus", "ascensão", "ascensao"}
 
     if head_filter is None:
         squads_visiveis = None
@@ -892,7 +892,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
 
     # Squads 100% SDR (sem closers no resultado) e 100% Closer (sem SDR no resultado)
     SQUADS_100_SDR_SET    = {"sniper"}
-    SQUADS_100_CLOSER_SET = {"elite", "olympus", "mgm", "latam", "orion"}
+    SQUADS_100_CLOSER_SET = {"elite", "olympus", "mgm", "latam", "orion", "ascensão", "ascensao"}
 
     EXCLUIR_CARDS = {"inteligencia comercial", "inteligência comercial", "int. comercial"}
     squads_result = []
@@ -947,21 +947,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "sdr_total": ts,
         })
 
-    DENISE_SQUADS = {"elite", "sniper", "mgm", "olympus"}
+    DENISE_SQUADS = {"elite", "sniper", "mgm", "olympus", "ascensão", "ascensao"}
     denise_squads = [r for r in squads_result if norm(r["nome"]) in DENISE_SQUADS]
     if denise_squads:
-        # Closer (Elite + Olympus) = 50% do resultado da Denise
-        closer_squads = [r for r in denise_squads if norm(r["nome"]) in {"elite", "olympus", "mgm"}]
+        # Denise = 100% financeiro (closer) — gerente de Ascensão
+        closer_squads = [r for r in denise_squads]
         d_closer = arred(safe_div(sum(sq["ating_closer"] for sq in closer_squads), len(closer_squads))) if closer_squads else 0
-        # SDR (Sniper) = 50% do resultado da Denise
-        sdr_squads = [r for r in denise_squads if norm(r["nome"]) == "sniper"]
-        d_sdr_vals = [sq["ating_sdr"] for sq in sdr_squads if sq["ating_sdr"] is not None]
-        d_sdr = arred(sum(d_sdr_vals) / len(d_sdr_vals)) if d_sdr_vals else None
-        # 50% closer + 50% SDR
-        if d_sdr is not None:
-            d_resultado = arred((d_closer + d_sdr) / 2)
-        else:
-            d_resultado = d_closer
+        d_sdr = None
+        d_resultado = d_closer
         squads_result.append({
             "nome": "Denise Mussolin", "ating_closer": d_closer, "ating_sdr": d_sdr,
             "resultado": d_resultado, "tem_sdr": d_sdr is not None, "is_consolidated": True,
@@ -1615,7 +1608,7 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
     uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
 
     # Squads visíveis
-    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus"}
+    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus", "ascensão", "ascensao"}
 
     if head_filter is None:
         squads_visiveis = None
@@ -1843,7 +1836,7 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
 
     # GAP 25: meta de 25 reuniões POR EQUIPE por dia
     # Apenas Sniper, Elite e Olympus/MGM — SDRs individuais ficam com —
-    SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm"}
+    SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm", "ascensão", "ascensao"}
     for sq_name, sq_data in result.items():
         tem_gap25 = norm(sq_name) in SQUADS_GAP25
         for row in sq_data["rows"]:
@@ -1879,7 +1872,7 @@ def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
              "realizada": 0, "no_show": None, "gap": 0,
              "gap_25": None, "pct_25": None}
         # GAP 25 consolidado Denise = 75 (3 equipes × 25)
-        DENISE_SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm"}
+        DENISE_SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm", "ascensão", "ascensao"}
         meta_25 = 0
         for sq_name, sq_data in result.items():
             if norm(sq_name) not in squad_names: continue
