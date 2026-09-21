@@ -2348,10 +2348,11 @@ def calcular_ranking(mes=None, ano=None):
     def act_valida(act):
         if not (act.get("done") is True or act.get("status") == "done"): return False
         deal_id   = act.get("deal_id")
+        if not deal_id: return False  # exige deal vinculado
         act_owner = str(act.get("owner_id", ""))
         deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
         if act_owner and deal_owner and act_owner == deal_owner: return False
-        if deal_id and deal_id not in deal_ids_validos: return False
+        if deal_id not in deal_ids_validos: return False
         return True
 
     closers_list = []
