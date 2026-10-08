@@ -39,7 +39,7 @@ DENISE_NORM      = "denise mussolin"   # nome normalizado da Denise
 # Mapeamento funil → squad display (para distribuir vendas da Denise)
 FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus", "navigator": "Ascensão"}
 EXCLUIR_REU_CLOSER = {"matheus paz", "priscila ribeiro"}  # responsavel ignorado nas reunioes de closer
-EXCLUIR_REU_SDR    = {"denise mussolin", "priscila ribeiro"}  # ignorados como SDR
+EXCLUIR_REU_SDR    = {"denise mussolin", "priscila ribeiro", "fernanda santaniello", "larissa vitor", "mylena oliveira", "alessandra costa"}  # ignorados como SDR
 SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
 
 # Mapeamento de nomes de exibição (cosmético)
