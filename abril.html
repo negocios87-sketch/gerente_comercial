@@ -400,6 +400,65 @@ function renderClosers(closers, total, squadIdx) {
   </div>`;
 }
 
+// ── SDR MEETINGS EXPORT ────────────────────────────────────────
+let _allSdrMeetings = [];  // cache global
+
+function collectSdrMeetings(squads) {
+  const meetings = [];
+  (squads || []).forEach(sq => {
+    (sq.sdrs || []).forEach(s => {
+      (s.reunioes_detalhes || []).forEach(r => {
+        meetings.push({
+          sdr: s.nome,
+          squad: sq.nome || s.squad || s.subarea || '',
+          titulo: r.titulo || '—',
+          subject: r.subject || '',
+          data_reuniao: r.data_reuniao || '',
+          deal_id: r.deal_id || '',
+        });
+      });
+    });
+  });
+  // Ordena por data desc
+  meetings.sort((a, b) => (b.data_reuniao || '').localeCompare(a.data_reuniao || ''));
+  return meetings;
+}
+
+function exportSdrMeetingsCSV() {
+  if (!_allSdrMeetings.length) { alert('Nenhuma reunião validada encontrada.'); return; }
+  const header = ['SDR','Squad','Negócio (Título)','Tipo de Atividade','Data da Reunião','Deal ID'];
+  const rows = _allSdrMeetings.map(r => [
+    r.sdr, r.squad, r.titulo, r.subject, r.data_reuniao, r.deal_id
+  ]);
+  const csv = [header, ...rows].map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  const mes = document.getElementById('sel-mes')?.value || '';
+  const ano = document.getElementById('sel-ano')?.value || '';
+  a.download = `reunioes_sdr_${mes}_${ano}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function openSdrMeetingsModal() {
+  if (!_allSdrMeetings.length) { alert('Nenhuma reunião validada no período.'); return; }
+  const rows = _allSdrMeetings.map(r => `
+    <tr>
+      <td style="white-space:nowrap">${r.data_reuniao||'—'}</td>
+      <td>${r.sdr}</td>
+      <td style="font-size:10px;opacity:.8">${r.squad}</td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.titulo||'').replace(/"/g,'&quot;')}">${r.titulo||'—'}</td>
+      <td style="font-size:10px;opacity:.7">${r.subject||''}</td>
+    </tr>`).join('');
+  document.getElementById('sdrMeetingsBody').innerHTML = rows;
+  document.getElementById('sdrMeetingsCount').textContent = _allSdrMeetings.length;
+  document.getElementById('sdrMeetingsModal').style.display = 'flex';
+}
+
+function closeSdrMeetingsModal() {
+  document.getElementById('sdrMeetingsModal').style.display = 'none';
+}
+
 // ── SDR TABLE ─────────────────────────────────────────────────
 function sdrRow(s, isMember, gid) {
   const cls = isMember ? `row-member" data-mid="${gid}` : ``;
@@ -573,12 +632,18 @@ function renderAbril(data) {
   document.getElementById('update-info').textContent = `Atualizado: ${p.atualizado_em}`;
 
   let html = `<div class="section-header" style="margin-bottom:16px">
-    <button onclick="exportarGanhos()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px">↓ Exportar Ganhos CSV</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="exportarGanhos()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px">↓ Exportar Ganhos CSV</button>
+      <button onclick="openSdrMeetingsModal()" style="background:transparent;color:var(--navy);border:1px solid var(--navy);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px">📋 Reuniões SDR</button>
+      <button onclick="exportSdrMeetingsCSV()" style="background:transparent;color:var(--navy);border:1px solid #aaa;border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px">↓ Exportar Reuniões SDR</button>
+    </div>
     <div class="toggle-group">
       <button class="toggle-btn active" onclick="setModo(false)">Sem Multiplicador</button>
       <button class="toggle-btn" onclick="setModo(true)">Com Multiplicador</button>
     </div>
   </div>`;
+
+  _allSdrMeetings = collectSdrMeetings(data.squads);
 
   (data.squads || []).forEach((sq, i) => {
     html += `<div class="squad-block">
@@ -1789,5 +1854,42 @@ document.getElementById('sel-mes').value = hoje.getMonth() + 1;
 fetchAbril();
 setInterval(fetchAbril, 5 * 60 * 1000);
 </script>
+
+<!-- ── MODAL: REUNIÕES VALIDADAS SDR ─────────────────────────── -->
+<div id="sdrMeetingsModal" style="display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;background:rgba(0,0,0,.55)">
+  <div style="background:#fff;border-radius:10px;width:92%;max-width:860px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+    <!-- header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e5e7eb;flex-shrink:0">
+      <div>
+        <span style="font-size:15px;font-weight:700;color:#0A1B2E">📋 Reuniões Validadas — SDRs</span>
+        <span id="sdrMeetingsCount" style="margin-left:10px;font-size:12px;background:#EFF6FF;color:#1e40af;padding:2px 8px;border-radius:12px;font-weight:600"></span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="exportSdrMeetingsCSV()" style="background:#0A1B2E;color:#D4AF37;border:1px solid #D4AF37;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">↓ CSV</button>
+        <button onclick="closeSdrMeetingsModal()" style="background:transparent;border:1px solid #e5e7eb;border-radius:6px;padding:5px 10px;font-size:14px;cursor:pointer;color:#666">✕</button>
+      </div>
+    </div>
+    <!-- body -->
+    <div style="overflow-y:auto;flex:1;padding:0 20px 16px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">
+        <thead>
+          <tr style="background:#f1f5f9;position:sticky;top:0">
+            <th style="padding:8px 10px;text-align:left;font-size:11px;color:#475569;font-weight:600;white-space:nowrap">Data</th>
+            <th style="padding:8px 10px;text-align:left;font-size:11px;color:#475569;font-weight:600">SDR</th>
+            <th style="padding:8px 10px;text-align:left;font-size:11px;color:#475569;font-weight:600">Squad</th>
+            <th style="padding:8px 10px;text-align:left;font-size:11px;color:#475569;font-weight:600">Negócio</th>
+            <th style="padding:8px 10px;text-align:left;font-size:11px;color:#475569;font-weight:600">Tipo</th>
+          </tr>
+        </thead>
+        <tbody id="sdrMeetingsBody" style=""></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<style>
+#sdrMeetingsBody tr { border-bottom: 1px solid #f1f5f9; }
+#sdrMeetingsBody tr:hover { background: #f8fafc; }
+#sdrMeetingsBody td { padding: 7px 10px; vertical-align: middle; }
+</style>
 </body>
 </html>
