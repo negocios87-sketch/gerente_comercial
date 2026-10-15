@@ -536,6 +536,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             closer_real[owner_nome]["qtd"]         += 1
 
     deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
+    mapa_deal_titulo = {d["id"]: d.get("title", "") for d in deals}
     for d in deals:
         did = d["id"]
         if did not in mapa_deal_owner:
@@ -704,6 +705,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         pct_final     = arred(pct_reu * PESO_REU + pct_ganhos * PESO_FIN)
         lider_nn_sdr = nome_to_lider.get(norm(m["nome"]), "")
         lider_nome_sdr = next((name for nn2, name in [(norm(n), n) for n in [r.get(nome_col,"") for _, r in colab_df.iterrows()]] if nn2 == lider_nn_sdr), lider_nn_sdr)
+        reunioes_detalhes = [{
+            "titulo": mapa_deal_titulo.get(a.get("deal_id"), "—"),
+            "deal_id": a.get("deal_id"),
+            "data_reuniao": str(a.get("due_date", "") or "")[:10],
+            "subject": a.get("subject", ""),
+            "sdr": m["nome"],
+            "squad": sub,
+        } for a in validadas]
         get_squad(sub)["sdrs_ind"].append({
             "nome": m["nome"], "subarea": sub,
             "lider": lider_nome_sdr,
@@ -720,6 +729,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "pct_ganhos": pct_ganhos,
             "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
             "pct_final": pct_final,
+            "reunioes_detalhes": reunioes_detalhes,
         })
 
     sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
@@ -755,6 +765,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         deals_tl   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id_tl)] if qual_id_tl else []
         valor_tl   = sum(float(d.get("value") or 0) for d in deals_tl)
         valor_multi_tl = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_tl)
+        reunioes_detalhes_tl = [{
+            "titulo": mapa_deal_titulo.get(a.get("deal_id"), "—"),
+            "deal_id": a.get("deal_id"),
+            "data_reuniao": str(a.get("due_date", "") or "")[:10],
+            "subject": a.get("subject", ""),
+            "sdr": uname,
+            "squad": sub,
+        } for a in validadas_tl]
         get_squad(sub)["sdrs_ind"].append({
             "nome": uname, "subarea": sub,
             "lider": uname,
@@ -766,6 +784,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "valor_ganho": arred(valor_tl), "valor_ganho_multi": arred(valor_multi_tl),
             "pct_ganhos": 0, "ticket_medio": arred(safe_div(valor_tl, len(deals_tl))) if deals_tl else 0,
             "pct_final": 0,
+            "reunioes_detalhes": reunioes_detalhes_tl,
         })
         nomes_tl_adicionados.add(nn)
     for uid, uname in users_pipe.items():
@@ -788,6 +807,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         valor_ganho = sum(float(d.get("value") or 0) for d in deals_sdr)
         valor_multi = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
         if qtd_val == 0 and qtd_ganhos == 0: continue
+        reunioes_detalhes_tl2 = [{
+            "titulo": mapa_deal_titulo.get(a.get("deal_id"), "—"),
+            "deal_id": a.get("deal_id"),
+            "data_reuniao": str(a.get("due_date", "") or "")[:10],
+            "subject": a.get("subject", ""),
+            "sdr": uname,
+            "squad": own_sub,
+        } for a in validadas]
         get_squad(own_sub)["sdrs_ind"].append({
             "nome": uname, "subarea": own_sub, "is_lider": True,
             "meta_reuniao": 0, "meta_diaria": 0,
@@ -799,6 +826,7 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
             "pct_ganhos": 0,
             "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
             "pct_final": 0.0,
+            "reunioes_detalhes": reunioes_detalhes_tl2,
         })
 
     def total_closers(ind):
