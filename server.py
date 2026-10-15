@@ -684,17 +684,14 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
         nn  = m["nome_norm"]
         sub = nome_to_subarea.get(nn, "")
         if not sub or not visivel(sub, nn): continue
+        if nn in EXCLUIR_REU_SDR: continue  # nunca aparece como SDR (heads, gerentes, etc)
         meta_reu = m["meta_reu"]
         meta_fin = m["meta_fin"]
         uid      = nome_norm_to_uid.get(nn)
         uid_str  = str(uid) if uid else ""
 
         acts_sdr = acts_by_owner.get(uid_str, [])
-
-        if norm(m["nome"]) in EXCLUIR_REU_SDR:
-            validadas = []
-        else:
-            validadas = [a for a in acts_sdr if act_valida(a, sub)]
+        validadas = [a for a in acts_sdr if act_valida(a, sub)]
         qtd_val = len(validadas)
         deveria_estar = arred(safe_div(meta_reu, du_total) * du_pass)
         pct_reu       = arred(safe_div(qtd_val, meta_reu) * 100)
