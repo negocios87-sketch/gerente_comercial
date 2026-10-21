@@ -95,6 +95,9 @@
     .pct-green { background: var(--green-bg); color: var(--green); }
     .pct-amber { background: var(--amber-bg); color: var(--amber); }
     .pct-red   { background: var(--red-bg);   color: var(--red); }
+    .pct-blue  { background: #EFF6FF; color: #1E40AF; }
+    .pct-black { background: #E5E7EB; color: #1F2937; }
+    .carimbo { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 10px; line-height: 1.5; }
     .val-real  { color: var(--navy); font-weight: 600; }
     .val-multi { color: #5B21B6; font-weight: 600; }
     .deficit   { color: var(--red); }
@@ -182,11 +185,8 @@
 <div class="tab-bar">
   <div class="tab active" onclick="setTab('abril')" id="tab-abril">Abril 2026</div>
   <div class="tab" onclick="setTab('forecast')">Forecast Diário</div>
-  <div class="tab" id="tab-historico" style="display:none" onclick="setTab('historico')">Histórico</div>
-  <div class="tab" onclick="setTab('forecast-reunioes')">Forecast de Reuniões</div>
   <div class="tab" id="tab-overview" style="display:none" onclick="setTab('overview')">Overview</div>
   <div class="tab" onclick="setTab('ranking')">Ranking</div>
-  <div class="tab" onclick="setTab('organograma')">Organograma</div>
 </div>
 
 <div class="main">
@@ -200,16 +200,6 @@
       <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast...</div></div>
     </div>
   </div>
-  <div class="panel" id="panel-historico">
-    <div id="historico-content">
-      <div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>
-    </div>
-  </div>
-  <div class="panel" id="panel-forecast-reunioes">
-    <div id="fr-content">
-      <div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast de reuniões...</div></div>
-    </div>
-  </div>
   <div class="panel" id="panel-overview">
     <div id="overview-content">
       <div class="card"><div class="loading"><div class="spinner"></div>Carregando overview...</div></div>
@@ -220,13 +210,10 @@
       <div class="card"><div class="loading"><div class="spinner"></div>Carregando ranking...</div></div>
     </div>
   </div>
-  <div class="panel" id="panel-organograma">
-    <div id="organograma-content">
-      <div class="card"><div class="loading"><div class="spinner"></div>Montando organograma...</div></div>
-    </div>
-  </div>
 
 
+
+  <div class="carimbo" id="carimbo"></div>
 </div>
 
 <script>
@@ -242,32 +229,41 @@ function exportarGanhos() {
 }
 
 function setTab(tab) {
-  const tabs   = ['abril','forecast','historico','forecast-reunioes','overview','ranking','organograma'];
-  const panels = ['panel-abril','panel-forecast','panel-historico','panel-forecast-reunioes','panel-overview','panel-ranking','panel-organograma'];
+  const tabs   = ['abril','forecast','overview','ranking'];
+  const panels = ['panel-abril','panel-forecast','panel-overview','panel-ranking'];
+  TAB_ATUAL = tab;
+  mostrarCarimbo();
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===tab));
   document.querySelectorAll('.panel').forEach((p,i) => p.classList.toggle('active', panels[i]===`panel-${tab}`));
   if (tab === 'forecast') fetchForecast();
-  if (tab === 'historico') fetchHistorico();
-  if (tab === 'forecast-reunioes') fetchForecastReunioes();
   if (tab === 'overview') fetchOverview();
   if (tab === 'ranking') fetchRanking();
-  if (tab === 'organograma') fetchOrganograma();
 }
+
+// ── CARIMBO DE PARÂMETROS (CRN) ───────────────────────────────
+let TAB_ATUAL = 'abril';
+const CARIMBOS = {};
+function setCarimbo(tab, texto) { CARIMBOS[tab] = texto || ''; if (TAB_ATUAL === tab) mostrarCarimbo(); }
+function mostrarCarimbo() { const el = document.getElementById('carimbo'); if (el) el.textContent = CARIMBOS[TAB_ATUAL] || ''; }
+// "Hoje" sempre em horário de Brasília (R0), nunca pelo relógio UTC do navegador
+const hojeBR = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 
 // ── FORMAT ────────────────────────────────────────────────────
 const R = v => 'R$ ' + Number(v).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0});
 const P = v => v == null ? '—' : Number(v).toFixed(1) + '%';
 const N = v => Number(v).toLocaleString('pt-BR');
 
+// FL1 · Flag de desempenho (régua oficial da CRN)
+function flCls(pct) { return pct >= 120 ? 'pct-blue' : pct >= 100 ? 'pct-green' : pct >= 70 ? 'pct-amber' : pct >= 20 ? 'pct-red' : 'pct-black'; }
 function pctBadge(pct) {
   if (pct == null) return '—';
-  const cls = pct >= 100 ? 'pct-green' : pct >= 60 ? 'pct-amber' : 'pct-red';
+  const cls = flCls(pct);
   return `<span class="pct-badge ${cls}">${P(pct)}</span>`;
 }
 function defVal(v) {
   return v <= 0 ? `<span class="surplus">${R(Math.abs(v))}</span>` : `<span class="deficit">${R(v)}</span>`;
 }
-function barColor(pct) { return pct >= 100 ? '#0D7A3E' : pct >= 60 ? '#B8860B' : '#B91C1C'; }
+function barColor(pct) { return pct >= 120 ? '#1E40AF' : pct >= 100 ? '#0D7A3E' : pct >= 70 ? '#B8860B' : pct >= 20 ? '#B91C1C' : '#374151'; }
 
 // ── AVATAR ────────────────────────────────────────────────────
 function avatarHtml(nome) {
@@ -604,7 +600,8 @@ function renderResultados(resultados) {
         '<div class="rc-row"><span class="rc-label">Reuniões Valid.</span><span class="rc-val">' + N(r.sdr_reunioes) + '</span></div>'
       ].join('') : '';
 
-      const badge = r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' :
+      const badge = r.provisorio      ? ' <span class="badge-lider" title="Fora da CRN até a regra de frentes (FT1)">PROVISÓRIO</span>' :
+                    r.is_consolidated ? ' <span class="badge-lider">CONSOLIDADO</span>' :
                     r.is_total_geral   ? ' <span class="badge-lider" style="background:var(--navy);color:var(--gold);border-color:var(--navy)">TOTAL</span>' : '';
       const cls = 'result-card' + (r.is_consolidated ? ' result-card-consolidated' : '') + (r.is_total_geral ? ' result-card-total-geral' : '');
 
@@ -659,6 +656,7 @@ function renderAbril(data) {
   html += renderResultados(data.resultados);
 
   document.getElementById('abril-content').innerHTML = html;
+  setCarimbo('abril', data.carimbo);
   if (modoMulti) setModo(true);
 }
 
@@ -738,13 +736,13 @@ function renderForecast(data) {
   }
 
   const resumo = data.resumo || {};
-  const todayStr = new Date().toISOString().slice(0,10);
+  const todayStr = data.hoje || hojeBR();
   let html = '';
 
   // Bloco período no topo
   const _hoje = new Date();
-  const _iniDefault = new Date(_hoje.getFullYear(), _hoje.getMonth(), 1).toISOString().slice(0,10);
-  const _fimDefault = _hoje.toISOString().slice(0,10);
+  const _fimDefault = hojeBR();
+  const _iniDefault = _fimDefault.slice(0,8) + '01';
   html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
     <div style="background:var(--navy);padding:8px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span style="color:var(--gold);font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;flex:none">📊 RESUMO POR PERÍODO</span>
@@ -861,7 +859,7 @@ function renderForecast(data) {
               <th style="color:#6EE7B7">Realizado</th>
               <th style="color:#FCA5A5">Perda</th>
               <th>Total Prev.</th>
-              <th>% Ating.</th>
+              <th title="Conversão do forecast (F4): realizado ÷ (em aberto + realizado + perda)">% Conv.</th>
             </tr></thead>
             <tbody>${tbody}</tbody>
           </table>
@@ -870,10 +868,10 @@ function renderForecast(data) {
     </div>`;
   });
 
-  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
-  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
+  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px"><span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
 
   document.getElementById('forecast-content').innerHTML = html;
+  setCarimbo('forecast', data.carimbo);
 }
 
 async function fetchForecast() {
@@ -897,317 +895,9 @@ fcStyle.textContent = '.col-fc { text-align:right; white-space:nowrap; padding:1
 document.head.appendChild(fcStyle);
 
 
-// ── SNAPSHOT / HISTÓRICO ─────────────────────────────────────
+// ── PERFIL (vem do servidor) ─────────────────────────────────
 const IS_MASTER = {{ "true" if is_master else "false" }};
 const IS_DENISE = {{ "true" if is_denise else "false" }};
-
-async function salvarSnapshot(force=false) {
-  const url = force ? '/api/snapshot/sobrepor' : '/api/snapshot';
-  const res = await fetch(url, {method:'POST'});
-  const data = await res.json();
-  if (data.existe && !force) {
-    if (confirm(`Já existe um snapshot para hoje (${data.data}). Deseja sobrepor?`)) {
-      salvarSnapshot(true);
-    }
-    return;
-  }
-  if (data.ok) {
-    alert(`✅ Snapshot de ${data.data} salvo com sucesso!`);
-    fetchHistorico();
-  } else {
-    alert('Erro: ' + (data.erro || 'desconhecido'));
-  }
-}
-
-function renderHistorico(data) {
-  const snapshots = data.snapshots || {};
-  const datas = data.datas || [];
-
-  if (!datas.length) {
-    document.getElementById('historico-content').innerHTML =
-      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum snapshot encontrado. Salve o primeiro!</div></div>';
-    return;
-  }
-
-  const allSquads = [...new Set(datas.flatMap(d => Object.keys(snapshots[d] || {})))].sort();
-
-  let html = '';
-  allSquads.forEach(squad => {
-    const allDays = [...new Set(datas.flatMap(d => Object.keys((snapshots[d] || {})[squad] || {})))].sort();
-    if (!allDays.length) return;
-
-    let tbody = '';
-    allDays.forEach((dia, i) => {
-      const snapDate = datas.find(d => (snapshots[d] || {})[squad]?.[dia]);
-      if (!snapDate) return;
-      const row = snapshots[snapDate][squad][dia];
-      const gid = `h_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
-
-      const todayStr = new Date().toISOString().slice(0,10);
-      const isToday  = dia === todayStr;
-      const diaLabel = dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
-
-      const media     = row.media_prevista || 0;
-      const realizada = row.ganho || 0;
-      const pctAting  = media > 0 ? arred(realizada / media * 100) : null;
-
-      tbody += `<tr class="row-group" data-fc-gid="${gid}" onclick="toggleFcDay('${gid}')" style="cursor:pointer;${isToday?'background:#FFFBEB !important;border-left:3px solid var(--gold);':''}">
-        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
-        <td class="col-fc fc-media-val" style="background:rgba(13,122,62,.05)">${R(media)}</td>
-        <td class="col-fc" style="color:var(--green);font-weight:600">${R(realizada)}</td>
-        <td class="col-fc" style="color:var(--amber);font-weight:600">${row.gap_25 != null ? N(row.gap_25) : '—'}</td>
-        <td class="col-fc" style="color:var(--amber)">${row.pct_25 != null ? pctBadgeFc(row.pct_25) : '—'}</td>
-        <td class="col-fc">${pctAting != null ? pctBadgeFc(pctAting) : '—'}</td>
-      </tr>`;
-
-      Object.entries(row.closers || {}).forEach(([ cname, cv ]) => {
-        const cMedia     = cv.media_prevista || 0;
-        const cRealizada = cv.ganho || 0;
-        const cPct       = cMedia > 0 ? arred(cRealizada / cMedia * 100) : null;
-        tbody += `<tr class="row-member" data-fc-mid="${gid}" style="display:none">
-          <td style="padding-left:36px"><div class="name-cell">${avatarHtml(cname)}<span style="color:var(--text-muted);font-size:11px">${cname}</span></div></td>
-          <td class="col-fc fc-media-val" style="font-size:11px;background:rgba(13,122,62,.03)">${R(cMedia)}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--green)">${R(cRealizada)}</td>
-          <td class="col-fc" style="font-size:11px">${cPct != null ? pctBadgeFc(cPct) : '—'}</td>
-        </tr>`;
-      });
-    });
-
-    const totM = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].media_prevista||0):0); }, 0);
-    const totG = allDays.reduce((a,d) => { const s=datas.find(dd=>(snapshots[dd]||{})[squad]?.[d]); return a+(s?(snapshots[s][squad][d].ganho||0):0); }, 0);
-    const totPct = totM > 0 ? arred(totG/totM*100) : null;
-
-    tbody += `<tr class="row-total">
-      <td>TOTAL</td>
-      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${R(totM)}</td>
-      <td style="color:var(--green);font-weight:700">${R(totG)}</td>
-      <td>${totPct!=null?pctBadgeFc(totPct):'—'}</td>
-    </tr>`;
-
-    html += `
-    <div class="squad-block">
-      <div class="squad-header">
-        <div class="squad-title">${squad}</div>
-        <div class="squad-divider"></div>
-      </div>
-      <div class="card">
-        <div class="table-scroll">
-          <table>
-            <thead><tr>
-              <th style="text-align:left;min-width:110px">Dia</th>
-              <th style="background:rgba(13,122,62,.15)">Média Prevista</th>
-              <th style="color:#6EE7B7">Realizada</th>
-              <th>% Atingimento</th>
-            </tr></thead>
-            <tbody>${tbody}</tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
-  });
-
-  const snapshotBtn = IS_MASTER ? `<button onclick="salvarSnapshot()" style="background:var(--navy);color:var(--gold);border:1px solid var(--gold);border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;margin-right:12px">📸 Salvar Snapshot</button>` : '';
-  html += `<div style="text-align:right;margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${snapshotBtn}<span style="color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</span></div>`;
-  document.getElementById('historico-content').innerHTML = html;
-}
-async function fetchHistorico() {
-  document.getElementById('historico-content').innerHTML =
-    '<div class="card"><div class="loading"><div class="spinner"></div>Carregando histórico...</div></div>';
-  try {
-    const res = await fetch('/api/historico');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.erro) throw new Error(data.erro);
-    renderHistorico(data);
-  } catch(e) {
-    document.getElementById('historico-content').innerHTML =
-      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
-  }
-}
-
-function arred(v) { try { return Math.round(parseFloat(v) * 100) / 100; } catch(e) { return 0; } }
-
-
-// ── FORECAST DE REUNIÕES ─────────────────────────────────────
-function toggleFrDay(gid) {
-  const grp = document.querySelector(`tr[data-fr-gid="${gid}"]`);
-  const members = document.querySelectorAll(`tr[data-fr-mid="${gid}"]`);
-  if (!grp) return;
-  const opening = !grp.classList.contains('fr-open');
-  grp.classList.toggle('fr-open', opening);
-  members.forEach(r => r.style.display = opening ? 'table-row' : 'none');
-}
-
-function resumoFrRow(label, r, highlight) {
-  const bg = highlight ? 'background:#FFF9E6;border-left:3px solid var(--gold);' : 'background:#F0F4FF;border-left:3px solid var(--navy);';
-  const color = highlight ? 'color:var(--gold)' : 'color:var(--navy)';
-  const ns   = r.no_show != null ? `<span style="color:var(--red)">${N(r.no_show)}</span>` : '—';
-  const gap25Cell = r.gap_25 != null ? `<span style="color:var(--amber);font-weight:700">${N(r.gap_25)}</span>` : '—';
-  const pct25Cell = r.pct_25 != null ? pctBadgeFc(r.pct_25) : '—';
-  return `<tr style="${bg}font-weight:700">
-    <td style="padding-left:14px;${color};font-size:12px">${label}</td>
-    <td class="col-fc" style="background:rgba(13,122,62,.05);color:var(--green)">${N(r.prevista||0)}</td>
-    <td class="col-fc">${N(r.ag_no_dia||0)}</td>
-    <td class="col-fc" style="color:var(--text-muted)">${N(r.ag_p_outros||0)}</td>
-    <td class="col-fc" style="color:var(--green)">${N(r.realizada||0)}</td>
-    <td class="col-fc">${ns}</td>
-    <td class="col-fc">${(r.prevista||0) > 0 ? ((r.realizada||0) < (r.prevista||0) ? `<span style="color:var(--red)">${N((r.prevista||0)-(r.realizada||0))}</span>` : `<span style="color:var(--green)">0</span>`) : '—'}</td>
-    <td class="col-fc">${(r.prevista||0) > 0 ? pctBadgeFc(arred((r.realizada||0)/(r.prevista||0)*100)) : '—'}</td>
-  </tr>`;
-}
-
-function renderForecastReunioes(data) {
-  const squads = data.squads || {};
-  if (!Object.keys(squads).length) {
-    document.getElementById('fr-content').innerHTML =
-      '<div class="card"><div class="loading" style="color:#9CA3AF">Nenhum dado encontrado.</div></div>';
-    return;
-  }
-
-  const resumo = data.resumo || {};
-  const todayStr = new Date().toISOString().slice(0,10);
-  let html = '';
-
-  // Linhas de resumo hoje
-  if (resumo.time_denise || resumo.geral) {
-    html += `<div class="card" style="margin-bottom:16px;overflow:hidden">
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:var(--navy)">
-          <th style="text-align:left;padding:8px 14px;color:var(--gold);font-size:10px;letter-spacing:.5px">RESUMO — Hoje: ${resumo.hoje||''} | Último DU: ${resumo.ontem||''}</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Prevista</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. no Dia</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Ag. p/ Outros</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">Realizada</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">No Show</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">GAP META</th>
-          <th style="padding:8px 12px;text-align:right;color:rgba(255,255,255,.6);font-size:10px">% GAP META</th>
-        </tr></thead>
-        <tbody>
-          ${resumo.time_denise ? resumoFrRow('🔶 Hoje — Time Denise', resumo.time_denise, true) : ''}
-          ${resumo.geral ? resumoFrRow('🔷 Hoje — Geral', resumo.geral, false) : ''}
-          ${resumo.time_denise_ontem ? resumoFrRow('◀ Último DU — Time Denise', resumo.time_denise_ontem, true) : ''}
-          ${resumo.geral_ontem ? resumoFrRow('◀ Último DU — Geral', resumo.geral_ontem, false) : ''}
-        </tbody>
-      </table>
-    </div>`;
-  }
-
-  Object.entries(squads).forEach(([squad, sq]) => {
-    const rows = sq.rows || [];
-    const tot  = sq.total  || {};
-    let tbody = '';
-
-    rows.forEach((row, i) => {
-      const gid = `fr_${squad}_${i}`.replace(/[^a-zA-Z0-9_]/g,'_');
-      const isPast   = row.dia < todayStr;
-      const isToday  = row.dia === todayStr;
-      const diaLabel = row.dia + (isToday ? '<span class="fc-today-badge">HOJE</span>' : '');
-      const pctCell  = row.pct != null ? pctBadgeFc(row.pct) : '—';
-      const nsCell   = row.no_show != null ? `<span style="color:var(--red)">${N(row.no_show)}</span>` : '—';
-      const gapCell  = row.gap > 0 ? `<span style="color:var(--red)">${N(row.gap)}</span>` : `<span style="color:var(--green)">${N(Math.abs(row.gap))}</span>`;
-
-      tbody += `<tr class="row-group" data-fr-gid="${gid}" onclick="toggleFrDay('${gid}')" style="cursor:pointer;${isToday?'background:#FFFBEB !important;border-left:3px solid var(--gold);':''}">
-        <td style="padding-left:14px;font-weight:600;color:var(--navy)">${diaLabel}</td>
-        <td class="col-fc" style="color:var(--gold);font-weight:600">${row.meta_diaria != null ? N(row.meta_diaria) : '—'}</td>
-        <td class="col-fc" style="background:rgba(13,122,62,.05);color:var(--green);font-weight:600">${N(row.prevista)}</td>
-        <td class="col-fc">${N(row.ag_no_dia)}</td>
-        <td class="col-fc" style="color:var(--text-muted)">${N(row.ag_p_outros)}</td>
-        <td class="col-fc" style="color:var(--green)">${N(row.realizada)}</td>
-        <td class="col-fc">${nsCell}</td>
-        <td class="col-fc">${row.meta_diaria > 0 ? (row.gap_meta > 0 ? `<span style="color:var(--red)">${N(row.gap_meta)}</span>` : `<span style="color:var(--green)">0</span>`) : '—'}</td>
-        <td class="col-fc">${row.pct_meta != null ? pctBadgeFc(row.pct_meta) : '—'}</td>
-      </tr>`;
-
-      // SDR rows (visible by default)
-      (row.sdrs || []).forEach(s => {
-        const sNomeLbl = s.is_lider ? `${s.nome} <span class="badge-lider">LÍDER</span>` : s.nome;
-        const sNs   = s.no_show != null ? `<span style="color:var(--red);font-size:11px">${N(s.no_show)}</span>` : '—';
-        const sGap  = s.gap > 0 ? `<span style="color:var(--red);font-size:11px">${N(s.gap)}</span>` : `<span style="color:var(--green);font-size:11px">${N(Math.abs(s.gap))}</span>`;
-        tbody += `<tr class="row-member" data-fr-mid="${gid}" style="display:none">
-          <td style="padding-left:32px">
-            <div class="name-cell">${avatarHtml(s.nome)}<span style="font-size:11px">${sNomeLbl}</span></div>
-          </td>
-          <td class="col-fc" style="font-size:11px;color:var(--gold)">—</td>
-          <td class="col-fc" style="font-size:11px;background:rgba(13,122,62,.03);color:var(--green)">${N(s.prevista)}</td>
-          <td class="col-fc" style="font-size:11px">${N(s.ag_no_dia)}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--text-muted)">${N(s.ag_p_outros)}</td>
-          <td class="col-fc" style="font-size:11px;color:var(--green)">${N(s.realizada)}</td>
-          <td class="col-fc" style="font-size:11px">${sNs}</td>
-          <td class="col-fc" style="font-size:11px">${s.prevista > 0 ? (s.realizada < s.prevista ? `<span style="color:var(--red);font-size:11px">${N(s.prevista - s.realizada)}</span>` : `<span style="color:var(--green);font-size:11px">0</span>`) : '—'}</td>
-          <td class="col-fc" style="font-size:11px">${s.prevista > 0 ? pctBadgeFc(arred(s.realizada / s.prevista * 100)) : '—'}</td>
-        </tr>`;
-      });
-    });
-
-    // Total row
-    const tGap = tot.gap > 0 ? `<span style="color:var(--red)">${N(tot.gap)}</span>` : `<span style="color:var(--green)">${N(Math.abs(tot.gap||0))}</span>`;
-    tbody += `<tr class="row-total">
-      <td>TOTAL</td>
-      <td style="color:var(--gold);font-weight:700">${tot.meta_diaria != null ? N(tot.meta_diaria) : '—'}</td>
-      <td style="background:rgba(13,122,62,.08);color:var(--green);font-weight:700">${N(tot.prevista||0)}</td>
-      <td>${N(tot.ag_no_dia||0)}</td>
-      <td style="color:var(--text-muted)">${N(tot.ag_p_outros||0)}</td>
-      <td style="color:var(--green);font-weight:700">${N(tot.realizada||0)}</td>
-      <td>—</td>
-      <td style="font-weight:700">${(tot.meta_diaria||0) > 0 ? ((tot.gap_meta||0) > 0 ? `<span style="color:var(--red);font-weight:700">${N(tot.gap_meta||0)}</span>` : `<span style="color:var(--green);font-weight:700">0</span>`) : '—'}</td>
-      <td>${tot.pct_meta != null ? pctBadgeFc(tot.pct_meta) : '—'}</td>
-    </tr>`;
-
-    html += `
-    <div class="squad-block">
-      <div class="squad-header">
-        <div class="squad-title">${squad}</div>
-        <div class="squad-divider"></div>
-      </div>
-      <div class="card">
-        <div class="table-scroll">
-          <table>
-            <thead><tr>
-              <th style="text-align:left;min-width:120px">Dia</th>
-              <th style="color:var(--gold)">Meta</th>
-              <th style="background:rgba(13,122,62,.15)">Prevista</th>
-              <th>Ag. no Dia</th>
-              <th style="color:#9CA3AF">Ag. p/ Outros</th>
-              <th style="color:#6EE7B7">Realizada</th>
-              <th style="color:#FCA5A5">No Show</th>
-              <th style="color:var(--red)">GAP META</th>
-              <th>% GAP META</th>
-            </tr></thead>
-            <tbody>${tbody}</tbody>
-          </table>
-        </div>
-      </div>
-    </div>`;
-  });
-
-  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;margin-top:8px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
-  document.getElementById('fr-content').innerHTML = html;
-
-  // Add CSS for fr rows open arrow
-  if (!document.getElementById('fr-style')) {
-    const s = document.createElement('style');
-    s.id = 'fr-style';
-    s.textContent = '.row-group.fr-open td:first-child::before { transform:rotate(0deg); } .row-group:not(.fr-open) td:first-child::before { transform:rotate(-90deg); }';
-    document.head.appendChild(s);
-  }
-}
-
-async function fetchForecastReunioes() {
-  document.getElementById('fr-content').innerHTML =
-    '<div class="card"><div class="loading"><div class="spinner"></div>Buscando forecast de reuniões...</div></div>';
-  try {
-    const mes = document.getElementById('sel-mes')?.value || '';
-    const ano = document.getElementById('sel-ano')?.value || '';
-    const res = await fetch(`/api/forecast-reunioes?mes=${mes}&ano=${ano}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.erro) throw new Error(data.erro);
-    renderForecastReunioes(data);
-  } catch(e) {
-    document.getElementById('fr-content').innerHTML =
-      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
-  }
-}
 
 
 // ── OVERVIEW (JACARÉ) ─────────────────────────────────────────
@@ -1226,7 +916,7 @@ function fmtBRL(v) {
 
 function criarGrafico(canvasId, squad, dias, metaTotal, isSdrSquad) {
   destroyChart(canvasId);
-  const todayFull = new Date().toISOString().slice(0,10);
+  const todayFull = hojeBR();
   const labels    = dias.map(d => d.dia.slice(8));
   // SDR squads (Sniper): usa reuniões no gráfico
   const metaLine  = isSdrSquad ? dias.map(d => d.meta_reu_mtd) : dias.map(d => d.meta_mtd);
@@ -1415,7 +1105,7 @@ function renderOverview(data) {
     html += `
     <div style="background:#fff;border:1px solid #B8860B;border-radius:8px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(184,134,11,.12)">
       <div style="font-size:12px;font-weight:700;color:#B8860B;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;display:flex;align-items:center;gap:6px">
-        <span style="width:3px;height:14px;background:#B8860B;border-radius:2px;display:inline-block"></span>Consolidado — Sniper + Elite + Olympus
+        <span style="width:3px;height:14px;background:#B8860B;border-radius:2px;display:inline-block"></span>Consolidado — Sniper + Elite + Olympus · Provisório
       </div>
       <canvas id="chart___DENISE__" height="90"></canvas>
     </div>`;
@@ -1434,6 +1124,7 @@ function renderOverview(data) {
 
   html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;font-style:italic">Atualizado: ${data.atualizado_em}</div>`;
   document.getElementById('overview-content').innerHTML = html;
+  setCarimbo('overview', data.carimbo);
 
   setTimeout(() => {
     [...row1entries, ...row2entries].forEach(([sq, sqData]) => {
@@ -1597,6 +1288,7 @@ function renderRanking(data) {
   `;
 
   document.getElementById('ranking-content').innerHTML = html;
+  setCarimbo('ranking', data.carimbo);
 }
 
 function toggleRankTime(t) {
@@ -1642,146 +1334,6 @@ async function fetchRanking() {
 }
 
 
-
-
-// ── ORGANOGRAMA ───────────────────────────────────────────────
-function orgAvatarHtml(nome, size) {
-  const initials = nome.split(' ').slice(0,2).map(p => p[0]?.toUpperCase() || '').join('');
-  const sz  = size === 'lg' ? 44 : size === 'sm' ? 36 : 30;
-  const border = size === 'lg' ? '2px solid var(--gold)' : size === 'sm' ? '2px solid var(--navy)' : '1px solid var(--border)';
-  const id  = 'av_org_' + Math.random().toString(36).slice(2);
-  return `<div style="position:relative;width:${sz}px;height:${sz}px;flex-shrink:0">
-    <img style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;border:${border};position:absolute;top:0;left:0"
-      id="${id}" src="${FOTO_BASE}${encodeURIComponent(nome)}.jpg" alt="${nome}"
-      onerror="orgTryExt(this,'${encodeURIComponent(nome)}','${id}_fb')">
-    <div id="${id}_fb" style="width:${sz}px;height:${sz}px;border-radius:50%;background:var(--navy);border:${border};display:none;align-items:center;justify-content:center;color:var(--gold);font-size:${Math.round(sz*0.28)}px;font-weight:700;position:absolute;top:0;left:0">${initials}</div>
-  </div>`;
-}
-
-function orgTryExt(img, enc, fbId) {
-  const src = img.src;
-  if      (src.endsWith('.jpg'))  img.src = FOTO_BASE + enc + '.jpeg';
-  else if (src.endsWith('.jpeg')) img.src = FOTO_BASE + enc + '.png';
-  else if (src.endsWith('.png'))  img.src = FOTO_BASE + enc + '.JPG';
-  else {
-    img.style.display = 'none';
-    const fb = document.getElementById(fbId);
-    if (fb) fb.style.display = 'flex';
-  }
-}
-
-function orgBadge(cargo) {
-  const c = (cargo||'').toLowerCase();
-  if (c.includes('head') || c.includes('gerente'))         return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:var(--gold-bg);color:var(--gold);border:1px solid var(--gold);text-transform:uppercase;letter-spacing:.5px">HEAD</span>';
-  if (c.includes('team leader') || c.includes('lider'))    return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:#EEF2FF;color:var(--navy);border:1px solid var(--navy);text-transform:uppercase;letter-spacing:.5px">LÍDER</span>';
-  if (c.includes('sdr') || c.includes('hunter'))           return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:#ECFDF5;color:#0D7A3E;border:1px solid #0D7A3E;text-transform:uppercase;letter-spacing:.5px">SDR</span>';
-  if (c.includes('closer') || c.includes('executiv'))      return '<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:3px;background:#FEF3C7;color:#92400E;border:1px solid #92400E;text-transform:uppercase;letter-spacing:.5px">CLOSER</span>';
-  return '';
-}
-
-function orgCard(p, size, extraStyle='') {
-  const isHead  = size === 'lg';
-  const isLider = size === 'sm';
-  const bgStyle = isHead  ? 'background:var(--gold-bg);border:2px solid var(--gold)' :
-                  isLider ? 'background:#F8F9FF;border:2px solid var(--navy)' :
-                            'background:var(--white);border:1px solid var(--border)';
-  const w = isHead ? 100 : isLider ? 86 : 76;
-  const firstName = p.nome.split(' ')[0];
-  const lastName  = p.nome.split(' ').slice(-1)[0];
-  const shortName = firstName + (lastName !== firstName ? ' ' + lastName : '');
-  return `<div style="${bgStyle};${extraStyle};border-radius:10px;padding:10px 10px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;width:${w}px;box-shadow:0 1px 4px rgba(0,0,0,.07)">
-    ${orgAvatarHtml(p.nome, size)}
-    <div style="font-size:10px;font-weight:700;color:var(--navy);text-align:center;line-height:1.2;word-break:break-word">${shortName}</div>
-  </div>`;
-}
-
-const LINE = 'background:var(--border)';
-
-function renderOrganograma(data) {
-  let html = '';
-
-  (data.squads || []).forEach(sq => {
-    html += `<div style="margin-bottom:48px">
-      <div style="font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:24px;display:flex;align-items:center;gap:8px">
-        <span style="width:3px;height:14px;background:var(--gold);border-radius:2px;display:inline-block"></span>${sq.squad}
-        <div style="flex:1;height:1px;background:var(--border)"></div>
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:center">`;
-
-    const temFilhos = sq.lideres.length > 0 || sq.sem_lider.length > 0;
-
-    // HEAD
-    if (sq.head) {
-      html += orgCard(sq.head, 'lg');
-      if (temFilhos) html += `<div style="width:2px;height:28px;${LINE};margin:0 auto"></div>`;
-    }
-
-    if (temFilhos) {
-      const allBranches = [
-        ...sq.lideres.map(b => ({ type: 'lider', data: b })),
-        ...sq.sem_lider.map(m => ({ type: 'membro', data: m })),
-      ];
-      const n = allBranches.length;
-
-      html += `<div style="display:flex;gap:32px;align-items:flex-start;position:relative">`;
-
-      // Horizontal line across top
-      if (n > 1) {
-        html += `<div style="position:absolute;top:0;left:0;right:0;height:2px;${LINE}"></div>`;
-      }
-
-      allBranches.forEach(branch => {
-        html += `<div style="display:flex;flex-direction:column;align-items:center;position:relative">`;
-        // Vertical line down to card
-        html += `<div style="width:2px;height:28px;${LINE};margin:0 auto"></div>`;
-
-        if (branch.type === 'lider') {
-          html += orgCard(branch.data.lider, 'sm');
-          if (branch.data.membros.length > 0) {
-            html += `<div style="width:2px;height:20px;${LINE};margin:0 auto"></div>`;
-            const nm = branch.data.membros.length;
-            html += `<div style="display:flex;gap:10px;align-items:flex-start;position:relative">`;
-            if (nm > 1) html += `<div style="position:absolute;top:0;left:0;right:0;height:2px;${LINE}"></div>`;
-            branch.data.membros.forEach(m => {
-              html += `<div style="display:flex;flex-direction:column;align-items:center">
-                <div style="width:2px;height:20px;${LINE};margin:0 auto"></div>
-                ${orgCard(m, 'xs')}
-              </div>`;
-            });
-            html += `</div>`;
-          }
-        } else {
-          html += orgCard(branch.data, 'xs');
-        }
-        html += `</div>`;
-      });
-
-      html += `</div>`;
-    }
-
-    html += `</div></div>`;
-  });
-
-  html += `<div style="text-align:right;color:var(--text-muted);font-size:11px;font-style:italic;margin-top:8px">Atualizado: ${data.atualizado_em}</div>`;
-  document.getElementById('organograma-content').innerHTML = html;
-}
-
-async function fetchOrganograma() {
-  document.getElementById('organograma-content').innerHTML =
-    '<div class="card"><div class="loading"><div class="spinner"></div>Montando organograma...</div></div>';
-  try {
-    const mes = document.getElementById('sel-mes')?.value || '';
-    const ano = document.getElementById('sel-ano')?.value || '';
-    const res = await fetch(`/api/organograma?mes=${mes}&ano=${ano}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.erro) throw new Error(data.erro);
-    renderOrganograma(data);
-  } catch(e) {
-    document.getElementById('organograma-content').innerHTML =
-      `<div class="card"><div class="error-state">Erro: ${e.message}</div></div>`;
-  }
-}
 
 
 // ── RESUMO POR PERÍODO ────────────────────────────────────────
@@ -1844,10 +1396,7 @@ async function fetchPeriodo() {
 }
 
 // Init
-const hoje = new Date();
-if (IS_MASTER || IS_DENISE) {
-  document.getElementById('tab-historico').style.display = '';
-}
+const hoje = new Date(hojeBR() + 'T12:00:00');
 // Overview disponível para todos
 document.getElementById('tab-overview').style.display = '';
 document.getElementById('sel-mes').value = hoje.getMonth() + 1;
