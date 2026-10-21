@@ -1,1038 +1,436 @@
 """
-Board Academy — Forecast Dashboard
-Deploy: Render.com
-"""
+Board Academy — Gerente Comercial (Forecast Dashboard)
+Deploy: Vercel. Regras de negócio: biblioteca crn (negocios87-sketch/CRN, branch main).
 
-from flask import Flask, jsonify, request, session, redirect, render_template
-import requests as req
-import pandas as pd
+Nenhuma regra é calculada aqui: o painel busca, chama as funções da crn e monta o JSON do front.
+Se uma conta não bate, a mudança é na CRN, não neste arquivo.
+"""
 import os
-import unicodedata
+
+# ── AMBIENTE ──────────────────────────────────────────────────
+# Nada muda na Vercel: o token continua em PIPE_API_KEY e é repassado para o nome que a crn lê.
+if os.environ.get("PIPE_API_KEY"):
+    os.environ.setdefault("PIPEDRIVE_TOKEN", os.environ["PIPE_API_KEY"])
+# Links das abas (provisório, decidido em 21/10/2026: resolver depois tirando do código).
+_PLANILHA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?single=true&output=csv&gid="
+os.environ.setdefault("URL_COLAB",    _PLANILHA + "1782440078")
+os.environ.setdefault("URL_METAS",    _PLANILHA + "0")
+os.environ.setdefault("URL_USERS",    _PLANILHA + "160245570")
+os.environ.setdefault("URL_FERIADOS", _PLANILHA + "1010928978")
+
 import calendar
+import csv
+import io
 import math
-from datetime import date, datetime, timedelta
-from io import StringIO
+import time
+import traceback
+from collections import defaultdict
+from datetime import date, timedelta
+
+from flask import Flask, Response, jsonify, redirect, render_template, request, session
+
+import crn
+from crn.base import fontes, pipedrive
+from crn.base.config import campo, config, filtro
+from crn.base.fontes import FonteInvalida
+from crn.base.fuso import agora_brasil, atividade_dia, data_brasil, data_local, hoje_brasil
+from crn.base.texto import cf, dono_id, norm
+from crn.regras import (a1_resultado_squad as a1, as3_meta_ascensao as as3, f1_forecast_faixas as f1,
+                        f2_forecast_media as f2, f3_forecast_perda as f3, f4_conversao_forecast as f4,
+                        h1_hierarquia as h1, lc1_licenciado as lc1, m1_ganho_closer as m1,
+                        m2_faturamento_closer as m2, m3_atingimento_closer as m3, m4_ganho_sdr as m4,
+                        m5_faturamento_sdr as m5, m6_reunioes_sdr as m6, m7_pct_final_sdr as m7,
+                        rf1_referidos as rf1, t1_mtd_closer as t1)
 
 app = Flask(__name__, template_folder='.')
 app.secret_key = os.environ.get("SECRET_KEY", "boardacademy2026secret")
 
-API_KEY           = os.environ.get("PIPE_API_KEY", "")
+SUPERUSERS_RAW = os.environ.get("SUPERUSERS", "farias souza")
+MASTERS_RAW    = os.environ.get("MASTERS", "rodrigo leira,matheus paz,farias souza")
+DENISE_NORM    = "denise mussolin"
 
-BASE_V1           = "https://boardacademy.pipedrive.com/api/v1"
-BASE_V2           = "https://boardacademy.pipedrive.com/api/v2"
-FILTER_DEALS      = int(os.environ.get("FILTER_DEALS",      "74674"))
-FILTER_DEALS_RV   = int(os.environ.get("FILTER_DEALS_RV",   "1431880"))
-FILTER_ACTIVITIES = int(os.environ.get("FILTER_ACTIVITIES", "1310451"))
-
-CF_MULTIPLICADOR = "7e0e43c2734751f77be292a72527f638a850ad50"
-CF_QUALIFICADOR  = "a6f13cc27c8d041f3af4091283ce0d4fe0913875"
-CF_REUNIAO_VALID = "7299bf170c5deab9b4fd8c2275f55faf51984dea"
-
-URL_COLAB    = os.environ.get("URL_COLAB",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1782440078&single=true&output=csv")
-URL_METAS    = os.environ.get("URL_METAS",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=0&single=true&output=csv")
-URL_USERS    = os.environ.get("URL_USERS",    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=160245570&single=true&output=csv")
-URL_FERIADOS = os.environ.get("URL_FERIADOS", "https://docs.google.com/spreadsheets/d/e/2PACX-1vSvwO3Ag2f2cbkVgR1pJZp6fANQcbualGKlAG50fmOljuEGKZ1gJBbSAjRdO3SomXUEVQOWnTvlfHRd/pub?gid=1010928978&single=true&output=csv")
-
-# Squads que usam criador da atividade em vez do responsável
-SQUADS_CRIADOR   = {"zenite"}
-DENISE_NORM      = "denise mussolin"   # nome normalizado da Denise
-# Mapeamento funil → squad display (para distribuir vendas da Denise)
-FUNIL_SQUAD_MAP  = {"elite": "Elite", "sniper": "Sniper", "olympus": "Olympus", "mgm": "Olympus", "navigator": "Ascensão"}
-EXCLUIR_REU_CLOSER = {"matheus paz", "priscila ribeiro"}  # responsavel ignorado nas reunioes de closer
-EXCLUIR_REU_SDR    = {"denise mussolin", "priscila ribeiro", "fernanda santaniello", "larissa vitor", "mylena oliveira", "alessandra costa", "thais montalvao"}  # ignorados como SDR
-SQUADS_COM_SDR     = {"elite", "zenite", "sniper", "mgm", "olympus"}
-
-# Mapeamento de nomes de exibição (cosmético)
-SQUAD_DISPLAY = {"MGM": "Olympus", "mgm": "Olympus", "Ascensão": "Ascensão", "ascensão": "Ascensão", "ascensao": "Ascensão", "Ascensao": "Ascensão"}
-def display_squad(nome):
-    return SQUAD_DISPLAY.get(nome, SQUAD_DISPLAY.get(nome.strip(), nome))
-
-# Squads excluídos do Overview (Jacaré)
-SQUADS_EXCLUIR_OVERVIEW = {"licenciados"}
-# Squads incluídos no total do Overview
-SQUADS_TOTAL_OVERVIEW   = {"sniper", "elite", "mgm", "latam", "orion", "zenite", "ascensão", "ascensao"}
+# ── RECORTES DO PAINEL (escolha do painel, não regra; vão no carimbo) ─────────
+SQUADS_SEM_SDR   = {"latam", "orion"}                       # não mostram líder na tabela de SDR
+EXCLUIR_CARDS    = {"inteligencia comercial", "int. comercial"}
+EXCLUIR_GERAL    = {"zenite", "licenciados", "inteligencia comercial", "int. comercial"}  # Total Geral (decidido 21/10/2026)
+# Consolidados da Denise e "Geral": PROVISÓRIOS até a FT1 (frentes) sair de Decisão.
+DENISE_SQUADS    = {"sniper", "elite", "mgm", "olympus", "ascensao"}
+DENISE_FC        = {"sniper", "elite", "olympus", "mgm"}
+GERAL_FC         = {"sniper", "elite", "olympus", "mgm", "latam", "orion", "zenite"}
+LICENCIADOS      = "Licenciados"
+SQUAD_ASCENSAO   = norm(config()["AS3_meta_ascensao"]["squad"])
+FORA_FORECAST    = {norm(s) for s in config()["squads"]["fora_do_forecast"]}
+CACHE_PIPEDRIVE  = 120   # segundos: a aba do mês e o Overview usam a mesma busca
 
 # ── HELPERS ───────────────────────────────────────────────────
-def norm(s):
-    if not s: return ""
-    s = str(s).strip().lower()
-    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
-
-SUPERUSERS_RAW = os.environ.get("SUPERUSERS", "farias souza")
-MASTERS_RAW   = os.environ.get("MASTERS", "rodrigo leira,matheus paz,farias souza")
-GITHUB_TOKEN  = os.environ.get("GITHUB_TOKEN", "")
-GITHUB_REPO   = "negocios87-sketch/gerente_comercial"
-GITHUB_BRANCH = "main"
-
 def arred(v):
     try:
         f = float(v)
         return 0.0 if math.isnan(f) or math.isinf(f) else round(f, 2)
-    except: return 0.0
+    except (TypeError, ValueError):
+        return 0.0
 
 def safe_div(a, b):
     try: return float(a) / float(b) if b else 0.0
-    except: return 0.0
-
-def cf(deal, key):
-    val = deal.get(key)
-    if val is None: return None
-    if isinstance(val, dict): return val.get("value") or val.get("label")
-    return val
-
-def get_owner_name(deal):
-    uid = deal.get("user_id")
-    if isinstance(uid, dict): return uid.get("name", "")
-    return ""
-
-def get_owner_id(deal):
-    uid = deal.get("user_id")
-    if isinstance(uid, dict): return uid.get("id")
-    return uid
-
-def du_mes_total(ano, mes, feriados=set()):
-    return sum(1 for d in range(1, calendar.monthrange(ano, mes)[1] + 1)
-               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
-
-def du_passados(ano, mes, feriados=set()):
-    hoje = date.today()
-    return max(sum(1 for d in range(1, min(hoje.day, calendar.monthrange(ano, mes)[1]) + 1)
-                   if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados), 1)
-
-def du_restantes(ano, mes, feriados=set()):
-    hoje = date.today()
-    ultimo = calendar.monthrange(ano, mes)[1]
-    return sum(1 for d in range(hoje.day + 1, ultimo + 1)
-               if date(ano, mes, d).weekday() < 5 and date(ano, mes, d) not in feriados)
+    except (TypeError, ValueError): return 0.0
 
 def limpar_nans(obj):
-    if isinstance(obj, dict): return {k: limpar_nans(v) for k, v in obj.items()}
+    if isinstance(obj, dict): return {k: limpar_nans(v) for k, v in obj.items() if not str(k).startswith("_")}
     if isinstance(obj, list): return [limpar_nans(v) for v in obj]
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)): return None
     return obj
 
-# ── SHEETS ────────────────────────────────────────────────────
-def ler_sheet(url):
-    resp = req.get(url, timeout=15)
-    resp.encoding = "utf-8"
-    resp.raise_for_status()
-    return pd.read_csv(StringIO(resp.text))
+def agora_str():
+    return agora_brasil().strftime("%d/%m/%Y %H:%M")
 
+def carimbo(texto):
+    return f"CRN {crn.versao()} · {texto} · Atualizado: {agora_str()}"
+
+_memo = {}
+def memo(chave, fn, ttl=CACHE_PIPEDRIVE):
+    agora = time.time()
+    if chave in _memo and agora - _memo[chave][0] < ttl:
+        return _memo[chave][1]
+    valor = fn()
+    _memo[chave] = (agora, valor)
+    return valor
+
+def limites_mes(ano, mes):
+    return date(ano, mes, 1), date(ano, mes, calendar.monthrange(ano, mes)[1])
+
+def eh_lic(squad):
+    return (squad or "").upper().startswith("LIC")
+
+def erro_json(e):
+    if isinstance(e, FonteInvalida):
+        return jsonify({"erro": str(e)}), 500
+    return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+
+# ── LOGIN ─────────────────────────────────────────────────────
 def buscar_usuario(usuario, senha):
-    df = ler_sheet(URL_USERS)
-    df.columns = [c.strip().lower() for c in df.columns]
-    for _, row in df.iterrows():
-        if (norm(str(row.get("usuario", ""))) == norm(usuario) and
-                str(row.get("senha", "")).strip() == str(senha).strip()):
-            return str(row.get("usuario", ""))
+    for row in fontes.ler_csv("URL_USERS"):
+        r = {k.strip().lower(): v for k, v in row.items()}
+        if norm(r.get("usuario", "")) == norm(usuario) and str(r.get("senha", "")).strip() == str(senha).strip():
+            return str(r.get("usuario", ""))
     return None
 
-def buscar_colaboradores(mes=None, ano=None):
-    df = ler_sheet(URL_COLAB)
-    df.columns = [c.strip() for c in df.columns]
+def is_master(nome_sess):
+    return norm(nome_sess) in {norm(u.strip()) for u in MASTERS_RAW.split(",")}
 
-    mes_col = next((c for c in df.columns if "mes" in norm(c) and "ref" in norm(c)), None)
-    ano_col = next((c for c in df.columns if "ano" in norm(c) and "ref" in norm(c)), None)
+def is_superuser(nome_sess):
+    return norm(nome_sess) in {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
 
-    if mes_col and ano_col and mes and ano:
-        def to_int(v):
-            try: return int(float(str(v)))
-            except: return 0
-        mask = (df[mes_col].apply(to_int) == mes) & (df[ano_col].apply(to_int) == ano)
-        df = df[mask].copy() if not df.empty else df
-        # Deduplica por nome — remove linhas duplicadas do mesmo mês
-        nome_col_d = next((c for c in df.columns if norm(c) == "nome"), None)
-        if nome_col_d:
-            df = df.drop_duplicates(subset=[nome_col_d], keep="first")
-        if df.empty:
-            df = ler_sheet(URL_COLAB)
-            df.columns = [c.strip() for c in df.columns]
+def head_filter_da_sessao(nome_sess, colab):
+    """Quem vê o quê (H1 identifica head/líder; o recorte de visão é do painel)."""
+    nn = norm(nome_sess)
+    if is_superuser(nome_sess): return None
+    if nn == DENISE_NORM:       return "__denise__"
+    if any(p["head_norm"] == nn for p in colab): return nome_sess
+    if any(p["lider_norm"] == nn and p["squad"] for p in colab): return f"__lider__:{nome_sess}"
+    return "__none__"
 
-    status_col = next((c for c in df.columns if "status" in norm(c)), None)
-    if status_col:
-        df = df[df[status_col].apply(lambda x: norm(str(x)) == "ativo")]
-    return df
+# ── DADOS DO MÊS (uma busca, usada por aba do mês, Overview, Ranking e CSV) ───
+def _carregar_mes(ano, mes):
+    ini, fim = limites_mes(ano, mes)
+    feriados = fontes.carregar_feriados()
+    du       = fontes.dias_uteis_periodo(ano, mes, feriados, hoje_brasil())   # A2
+    colab    = fontes.carregar_colab(ano, mes)                                 # erro se o mês não tem Colab
+    metas    = fontes.carregar_metas(ano, mes)
+    usuarios = pipedrive.usuarios()
+    funis    = pipedrive.funis()
+    opc_qual = pipedrive.opcoes_campo(campo("qualificador"))
 
-def buscar_feriados():
-    try:
-        df = ler_sheet(URL_FERIADOS)
-        feriados = set()
-        for _, row in df.iterrows():
-            val = str(row.iloc[0]).strip()
-            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y"):
-                try:
-                    feriados.add(datetime.strptime(val, fmt).date())
-                    break
-                except: continue
-        return feriados
-    except: return set()
+    # Ganhos (M1): só o período, sem filtro salvo; R4/R3/G1 separados pela crn
+    ganhos_brutos = pipedrive.ganhos_do_periodo(ini, fim)
+    sep           = m1.separar_ganhos(ganhos_brutos, ano, mes, usuarios)
+    por_closer    = m1.ganhos_por_closer(sep["validos"], colab, funis, usuarios)
+    por_sdr       = m4.ganhos_por_sdr(sep["validos"], opc_qual)                # M4
 
-def buscar_metas_todas(ano, mes):
-    df = ler_sheet(URL_METAS)
-    df.columns = [c.strip() for c in df.columns]
+    # Reuniões (M6): só reuniões feitas do período, deals pelos ids
+    atividades  = pipedrive.atividades_do_periodo(ini, fim, tipos=["meeting"], done=True)
+    deals_reu   = pipedrive.deals_por_ids([a.get("deal_id") for a in atividades])
+    validados, donos = m6.mapas_dos_deals(deals_reu)
+    nn_para_uid = {norm(n): uid for uid, n in usuarios.items()}
+    sdr_ids     = {nn_para_uid[m["nome_norm"]] for m in metas if m["papel"] == "sdr" and m["nome_norm"] in nn_para_uid}
+    lider_ids   = {nn_para_uid[p["nome_norm"]] for p in colab
+                   if h1.nivel(p, colab) != "membro" and p["nome_norm"] in nn_para_uid}
+    reunioes    = m6.reunioes_validadas(atividades, ini, fim, deals_validados=validados, dono_do_deal=donos,
+                                        sdr_ids=sdr_ids, lideranca_ids=lider_ids)
 
-    def to_num(v):
-        try:
-            if v is None: return 0.0
-            if isinstance(v, float) and math.isnan(v): return 0.0
-            return float(str(v).replace("R$","").replace(".","").replace(",",".").strip() or "0")
-        except: return 0.0
+    # Referidos (RF1): o filtro 1562285 ainda é a definição (pendência na CRN)
+    refs_por_uid = rf1.referidos_do_mes(pipedrive.deals_do_filtro(filtro("referidos")), ano, mes)
+    referidos    = defaultdict(int)
+    for uid, lst in refs_por_uid.items():
+        referidos[norm(usuarios.get(uid, ""))] += len(lst)
 
-    col_ano  = next((c for c in df.columns if norm(c) == "ano"), None)
-    col_mes  = next((c for c in df.columns if norm(c) == "mes"), None)
-    col_nome = next((c for c in df.columns if norm(c) == "nome"), None)
-    col_reu  = next((c for c in df.columns if "reuni" in norm(c) and "meta" in norm(c)), None)
-    col_fin  = next((c for c in df.columns if "financ" in norm(c)), None)
-    col_du   = next((c for c in df.columns if "util" in norm(c)), None)
+    return {
+        "ano": ano, "mes": mes, "ini": ini, "fim": fim, "feriados": feriados, "du": du,
+        "colab": colab, "metas": metas, "usuarios": usuarios, "funis": funis,
+        "ganhos_brutos": ganhos_brutos, "sep": sep, "por_closer": por_closer, "por_sdr": por_sdr,
+        "reunioes": reunioes, "titulos": {d["id"]: d.get("title", "") for d in deals_reu},
+        "nn_para_uid": nn_para_uid, "referidos": referidos,
+    }
 
-    rows = []
-    for _, row in df.iterrows():
-        try:
-            a = int(float(str(row[col_ano]))) if col_ano else 0
-            m = int(float(str(row[col_mes]))) if col_mes else 0
-        except: continue
-        if a != ano or m != mes: continue
-        nome_raw = str(row[col_nome]).strip() if col_nome else ""
-        meta_reu = to_num(row[col_reu]) if col_reu else 0.0
-        meta_fin = to_num(row[col_fin]) if col_fin else 0.0
-        dias_ut  = 0
-        if col_du:
-            try: dias_ut = int(float(str(row[col_du] or 0)))
-            except: dias_ut = 0
-        rows.append({
-            "nome": nome_raw, "nome_norm": norm(nome_raw),
-            "meta_reu": meta_reu, "meta_fin": meta_fin, "dias_uteis": dias_ut,
-        })
-    return rows
+def carregar_mes(ano, mes):
+    return memo(("mes", ano, mes), lambda: _carregar_mes(ano, mes))
 
-# ── PIPEDRIVE ─────────────────────────────────────────────────
-def buscar_users_pipe():
-    resp = req.get(f"{BASE_V1}/users", params={"api_token": API_KEY}, timeout=15)
-    resp.raise_for_status()
-    return {u["id"]: u["name"] for u in (resp.json().get("data") or [])}
+def mes_ano_da_req():
+    hoje = hoje_brasil()
+    return (request.args.get("mes", type=int) or hoje.month), (request.args.get("ano", type=int) or hoje.year)
 
-def buscar_pipelines():
-    """Retorna mapa pipeline_id -> nome normalizado do funil."""
-    resp = req.get(f"{BASE_V1}/pipelines", params={"api_token": API_KEY}, timeout=15)
-    resp.raise_for_status()
-    return {p["id"]: norm(p["name"]) for p in (resp.json().get("data") or [])}
-
-def squad_por_funil(deal, pipes):
-    """Denise agora tem subarea=Ascensão no COLAB — sem redistribuição por funil."""
-    return None
-
-def buscar_qual_ids():
-    resp = req.get(f"{BASE_V1}/dealFields", params={"api_token": API_KEY}, timeout=15)
-    resp.raise_for_status()
-    for field in (resp.json().get("data") or []):
-        if field.get("key") == CF_QUALIFICADOR:
-            return {norm(opt.get("label", "")): str(opt.get("id")) for opt in (field.get("options") or [])}
-    return {}
-
-def won_time_br(deal):
-    wt = deal.get("won_time", "")
-    if not wt: return ""
-    try:
-        dt = datetime.fromisoformat(str(wt).replace("Z", "+00:00"))
-        dt_br = dt - timedelta(hours=3)
-        return dt_br.strftime("%Y-%m-%d %H:%M:%S")
-    except: return str(wt)
-
-def buscar_deals_mes(mes, ano):
-    todos, start = [], 0
-    mes_str = f"{ano}-{mes:02d}"
-    while True:
-        resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS, "status": "won",
-            "sort": "won_time DESC", "limit": 500,
-            "start": start, "api_token": API_KEY,
-        }, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        found_older = False
-        for deal in lote:
-            wt_br = won_time_br(deal)[:7]
-            if wt_br == mes_str: todos.append(deal)
-            elif wt_br < mes_str: found_older = True
-        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote or found_older: break
-        start += 500
-    return todos
-
-
-def buscar_referidos_mes(mes, ano):
-    """Conta referidos por owner (todos os status, filtro por mês de criação)"""
-    from collections import defaultdict
-    todos, start = [], 0
-    mes_str = f"{ano}-{mes:02d}"
-    while True:
-        resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_REFERIDOS,
-            "status": "all_not_deleted",
-            "limit": 500, "start": start,
-            "api_token": API_KEY,
-        }, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for deal in lote:
-            if str(deal.get("add_time", ""))[:7] == mes_str:
-                todos.append(deal)
-        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote: break
-        start += 500
-    contagem = defaultdict(int)
-    for deal in todos:
-        nn = norm(get_owner_name(deal))
-        if nn: contagem[nn] += 1
-    return contagem
-
-def buscar_deals_semanas(data_inicio, data_fim):
-    """Busca deals ganhos entre data_inicio e data_fim (YYYY-MM-DD)"""
-    todos, start = [], 0
-    while True:
-        resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS,
-            "status": "won",
-            "limit": 500, "start": start,
-            "api_token": API_KEY,
-        }, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for deal in lote:
-            wt = won_time_br(deal)[:10]
-            if data_inicio <= wt <= data_fim:
-                todos.append(deal)
-        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote: break
-        start += 500
-    return todos
-
-def buscar_activities_semanas(data_inicio, data_fim):
-    """Busca atividades com due_date entre data_inicio e data_fim"""
-    todos, cursor = [], None
-    while True:
-        params = {"filter_id": FILTER_ACTIVITIES, "limit": 200}
-        if cursor: params["cursor"] = cursor
-        resp = req.get(f"{BASE_V2}/activities", params=params,
-                       headers={"x-api-token": API_KEY}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for act in lote:
-            dd = str(act.get("due_date", "") or "")[:10]
-            if data_inicio <= dd <= data_fim:
-                todos.append(act)
-        cursor = data.get("additional_data", {}).get("next_cursor")
-        if not cursor or not lote: break
-    return todos
-
-def semanas_anteriores(n=4):
-    """Retorna as últimas n semanas completas (seg-dom), mais recente primeiro"""
-    hoje = date.today()
-    # Última segunda-feira passada
-    dias_desde_seg = hoje.weekday()  # 0=seg
-    ultima_seg = hoje - timedelta(days=dias_desde_seg + 7)  # semana anterior
-    semanas = []
-    for i in range(n):
-        seg = ultima_seg - timedelta(weeks=i)
-        dom = seg + timedelta(days=6)
-        semanas.append((seg, dom))
-    return semanas  # mais recente primeiro
-
-def buscar_activities_mes(mes, ano):
-    todos, cursor = [], None
-    mes_str = f"{ano}-{mes:02d}"
-    while True:
-        params = {"filter_id": FILTER_ACTIVITIES, "limit": 200}
-        if cursor: params["cursor"] = cursor
-        resp = req.get(f"{BASE_V2}/activities", params=params,
-                       headers={"x-api-token": API_KEY}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for act in lote:
-            if str(act.get("due_date", ""))[:7] == mes_str:
-                todos.append(act)
-        cursor = data.get("additional_data", {}).get("next_cursor")
-        if not cursor or not lote: break
-    return todos
-
-def buscar_deals_por_ids(deal_ids):
-    mapa = {}
-    for deal_id in set(deal_ids):
-        if not deal_id: continue
-        try:
-            resp = req.get(f"{BASE_V1}/deals/{deal_id}",
-                params={"api_token": API_KEY}, timeout=10)
-            if resp.status_code == 200:
-                d = resp.json().get("data") or {}
-                mapa[deal_id] = cf(d, CF_REUNIAO_VALID)
-        except: pass
-    return mapa
-
-def buscar_deals_rv_mes(mes, ano):
-    deal_ids_validos = set()
-    mapa_owner = {}
-    start = 0
-    while True:
-        resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS_RV,
-            "status": "all_not_deleted",
-            "limit": 500, "start": start,
-            "api_token": API_KEY,
-        }, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for d in lote:
-            did = d["id"]
-            uid = d.get("user_id")
-            deal_ids_validos.add(did)
-            mapa_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
-        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote: break
-        start += 500
-    return deal_ids_validos, mapa_owner
-
-def calcular_abril(mes=None, ano=None, head_filter=None):
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-
-    feriados  = buscar_feriados()
-    du_calc   = du_mes_total(ano, mes, feriados)
-    hoje      = date.today()
-    if (ano < hoje.year) or (ano == hoje.year and mes < hoje.month):
-        du_pass = du_calc
-        du_rest = 0
-    else:
-        du_pass = du_passados(ano, mes, feriados)
-        du_rest = du_restantes(ano, mes, feriados)
-
-    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
-    metas      = buscar_metas_todas(ano, mes)
-    users_pipe = buscar_users_pipe()
-    qual_ids   = buscar_qual_ids()
-    deals      = buscar_deals_mes(mes, ano)
-    activities = buscar_activities_mes(mes, ano)
-    referidos  = buscar_referidos_mes(mes, ano)
-    pipes      = buscar_pipelines()
-
-    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
-
-    nome_to_subarea = {}
-    nome_to_head    = {}
-    nome_to_cargo   = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        hd  = str(row.get(head_col, "")).strip() if head_col else ""
-        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
-        nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = norm(hd)
-        nome_to_cargo[nn]   = cg
-
-
-    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
-    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
-
-    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-    nome_to_lider = {}
-    if lider_col:
-        for _, row in colab_df.iterrows():
-            nn  = norm(str(row.get(nome_col, "")))
-            lid = norm(str(row.get(lider_col, "")))
-            nome_to_lider[nn] = lid
-
-    # team_leaders: quem tem lider = si mesmo (heads, TLs, gerentes)
-    team_leaders = {nn for nn, lid in nome_to_lider.items() if lid == nn and nn}
-    lider_nomes  = set(nome_to_lider.values())
-    SQUADS_SEM_SDR = {"latam", "orion"}
-
-    lider_filter_nn = None  # nome normalizado do líder, quando filtro é __lider__
-
-    pessoas_visiveis = None  # None = todos; set = só essas pessoas (por nome_norm)
-
-    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus", "ascensão", "ascensao"}
-
+# ── VISIBILIDADE ──────────────────────────────────────────────
+def montar_visibilidade(head_filter, colab):
+    sq_de   = {p["nome_norm"]: norm(p["squad"]) for p in colab}
+    head_de = {p["nome_norm"]: p["head_norm"] for p in colab}
+    lider_de = {p["nome_norm"]: p["lider_norm"] for p in colab}
+    squads_vis, pessoas_vis = None, None
     if head_filter is None:
-        squads_visiveis = None
-        pessoas_visiveis = None
+        pass
     elif head_filter == "__denise__":
-        squads_visiveis = DENISE_SQUADS_VISIVEIS
-        denise_nn = "denise mussolin"
-        # Heads diretos da Denise = quem tem head = Denise no COLAB
-        heads_da_denise = {nn for nn, hd in nome_to_head.items() if hd == denise_nn}
-        # Inclui também heads auto-referenciados dentro dos squads da Denise
-        # (ex: Marlon Silva que tem head = si mesmo mas gerencia Sniper)
-        heads_da_denise |= {nn for nn, sub in nome_to_subarea.items()
-                            if norm(sub) in DENISE_SQUADS_VISIVEIS
-                            and nome_to_head.get(nn) == nn}
-        # Pessoas visíveis = quem tem head = um desses heads OU head = Denise OU é a Denise
-        pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
-                            if hd in heads_da_denise or hd == denise_nn or nn == denise_nn}
+        squads_vis = set(DENISE_SQUADS)
+        heads = {nn for nn, hd in head_de.items() if hd == DENISE_NORM}
+        heads |= {nn for nn, sq in sq_de.items() if sq in DENISE_SQUADS and head_de.get(nn) == nn}
+        pessoas_vis = {nn for nn, hd in head_de.items() if hd in heads or hd == DENISE_NORM or nn == DENISE_NORM}
     elif head_filter == "__none__":
-        squads_visiveis = set()
-        pessoas_visiveis = None
+        squads_vis = set()
     elif head_filter.startswith("__lider__:"):
-        lider_filter_nn = norm(head_filter.replace("__lider__:", ""))
-        lider_sub = next((sub for nn, sub in nome_to_subarea.items()
-                          if nn == lider_filter_nn and sub), None)
-        squads_visiveis = {norm(lider_sub)} if lider_sub else set()
-        # Só membros cujo líder = esse líder (ou o próprio líder)
-        pessoas_visiveis = {nn for nn, lid in nome_to_lider.items()
-                            if lid == lider_filter_nn or nn == lider_filter_nn}
+        lid = norm(head_filter.split(":", 1)[1])
+        squads_vis = {sq_de[lid]} if sq_de.get(lid) else set()
+        pessoas_vis = {nn for nn, l in lider_de.items() if l == lid or nn == lid}
     elif head_filter.startswith("__squad__:"):
-        sub_direto = norm(head_filter.replace("__squad__:", ""))
-        squads_visiveis = {sub_direto}
+        squads_vis = {norm(head_filter.split(":", 1)[1])}
     else:
-        head_nn = norm(head_filter)
-        squads_visiveis = set(
-            norm(sub) for nn, sub in nome_to_subarea.items()
-            if norm(nome_to_head.get(nn, "")) == head_nn and sub
-        )
-        # Só pessoas cujo head = esse head + o próprio head
-        pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
-                            if hd == head_nn}
-        pessoas_visiveis.add(head_nn)  # inclui o próprio head
+        hd = norm(head_filter)
+        squads_vis = {sq for nn, sq in sq_de.items() if head_de.get(nn) == hd and sq}
+        pessoas_vis = {nn for nn, h in head_de.items() if h == hd} | {hd}
 
-    def visivel(sub, nome_nn=None):
-        if squads_visiveis is None: return True
-        if not squads_visiveis: return False
-        if norm(sub) not in squads_visiveis: return False
-        if pessoas_visiveis is not None and nome_nn:
-            return nome_nn in pessoas_visiveis
+    def visivel(squad, nn=None):
+        if squads_vis is None: return True
+        if norm(squad) not in squads_vis: return False
+        if pessoas_vis is not None and nn: return nn in pessoas_vis
         return True
+    return visivel, pessoas_vis
 
-    closer_real = {}        # nn -> {valor, valor_multi, qtd}
-    denise_por_squad = {}  # squad_display -> {valor, valor_multi, qtd}
-    for deal in deals:
-        owner_nome = norm(get_owner_name(deal))
-        if not owner_nome:
-            oid = get_owner_id(deal)
-            owner_nome = uid_to_nome_norm.get(oid, "")
-        if not owner_nome: continue
-        valor       = float(deal.get("value") or 0)
-        valor_multi = float(cf(deal, CF_MULTIPLICADOR) or 0)
-        # Denise: distribui pelo funil
-        squad_funil = squad_por_funil(deal, pipes)
-        if squad_funil:
-            if squad_funil not in denise_por_squad:
-                denise_por_squad[squad_funil] = {"valor": 0, "valor_multi": 0, "qtd": 0}
-            denise_por_squad[squad_funil]["valor"]       += valor
-            denise_por_squad[squad_funil]["valor_multi"] += valor_multi
-            denise_por_squad[squad_funil]["qtd"]         += 1
-        else:
-            if owner_nome not in closer_real:
-                closer_real[owner_nome] = {"valor": 0, "valor_multi": 0, "qtd": 0}
-            closer_real[owner_nome]["valor"]       += valor
-            closer_real[owner_nome]["valor_multi"] += valor_multi
-            closer_real[owner_nome]["qtd"]         += 1
+# ── ABA DO MÊS ────────────────────────────────────────────────
+def calcular_abril(mes=None, ano=None, head_filter=None):
+    hoje = hoje_brasil()
+    mes, ano = mes or hoje.month, ano or hoje.year
+    D = carregar_mes(ano, mes)
+    colab, metas = D["colab"], D["metas"]
+    du_total, du_pass, du_rest = D["du"]["total"], D["du"]["passados"], D["du"]["restantes"]
+    ref = date(ano, mes, 1)
+    pessoa  = {p["nome_norm"]: p for p in colab}
+    meta_de = {m["nome_norm"]: m for m in metas}
+    nome_de = {p["nome_norm"]: p["nome"] for p in colab}
+    visivel, pessoas_vis = montar_visibilidade(head_filter, colab)
 
-    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
-    mapa_deal_titulo = {d["id"]: d.get("title", "") for d in deals}
-    for d in deals:
-        did = d["id"]
-        if did not in mapa_deal_owner:
-            uid = d.get("user_id")
-            mapa_deal_owner[did] = uid.get("id") if isinstance(uid, dict) else uid
+    # Ganhos válidos por (squad da venda, dono) — M1 (head vende pelo funil; resto pelo Colab)
+    deals_sq = defaultdict(list)
+    for nn, info in D["por_closer"].items():
+        for d in info["deals"]:
+            deals_sq[(info["squad_por_deal"][d.get("id")], nn)].append(d)
 
-    # Agrupa atividades por owner_id E por created_by_user_id (para Zenite)
-    acts_by_owner   = {}
-    acts_by_creator = {}
-    # Mapa uid -> nome_norm para verificar Matheus Paz e closers
-    uid_to_nome_norm_all = {str(uid): norm(name) for uid, name in users_pipe.items()}
-    matheus_paz_uids = {str(uid) for uid, name in users_pipe.items() if norm(name) in EXCLUIR_REU_CLOSER}
-
-    for act in activities:
-        oid = str(act.get("owner_id", ""))
-        acts_by_owner.setdefault(oid, []).append(act)
-        cid = str(act.get("created_by_user_id", ""))
-        if cid:
-            acts_by_creator.setdefault(cid, []).append(act)
-
-    # Reunioes por closer: atividades cujo DEAL pertence ao closer
-    # Agrupa por deal_owner_uid -> lista de atividades
-    acts_by_deal_owner = {}
-    for act in activities:
-        if not (act.get("done") is True or act.get("status") == "done"): continue
-        deal_id = act.get("deal_id")
-        if not deal_id: continue
-        deal_own = str(mapa_deal_owner.get(deal_id, ""))
-        if not deal_own: continue
-        acts_by_deal_owner.setdefault(deal_own, []).append(act)
-
-    def contar_reu_closer(closer_uid_str, sub):
-        """Conta reunioes realizadas para o closer (deal owner = closer)"""
-        acts = acts_by_deal_owner.get(closer_uid_str, [])
-        tem_sdr = norm(sub) in SQUADS_COM_SDR
-        count = 0
-        for act in acts:
-            act_owner_uid = str(act.get("owner_id", ""))
-            # Exclui Matheus Paz como responsavel
-            if act_owner_uid in matheus_paz_uids: continue
-            if tem_sdr:
-                # Com SDR: responsavel NAO pode ser o proprio closer
-                if act_owner_uid == closer_uid_str: continue
-            else:
-                # Sem SDR: responsavel TEM que ser o proprio closer
-                if act_owner_uid != closer_uid_str: continue
-            count += 1
-        return count
-
-    def act_valida(act, sub=""):
-        if not (act.get("done") is True or act.get("status") == "done"): return False
-        deal_id   = act.get("deal_id")
-        act_owner = str(act.get("owner_id", ""))
-        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
-        if act_owner and deal_owner and act_owner == deal_owner:
-            return False
-        if deal_id and deal_id not in deal_ids_validos:
-            return False
-        return True
-
-    if (ano > 2026) or (ano == 2026 and mes >= 5):
-        PESO_REU = 0.70
-        PESO_FIN = 0.30
-    else:
-        PESO_REU = 0.50
-        PESO_FIN = 0.50
-
-    du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
-    du_total = du_sheet if du_sheet > 0 else du_calc
-
-    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
-    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0
-                      and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
-    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0
-                     and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
-
-    def build_closer_row(nome, meta, real, real_multi, qtd, is_head=False, refs=0, reu=0):
-        mtd = safe_div(meta, du_total) * du_pass if du_total else 0
+    def linha_closer(nome, meta, deals, is_head=False, refs=0):
+        real, multi = m2.bruto(deals), m2.multiplicador(deals)
+        mtd = t1.mtd(real, meta, du_total, du_pass)                       # T1-B
         return {
             "nome": nome, "meta": arred(meta), "is_head": is_head,
             "dias_uteis": du_total, "meta_du": arred(safe_div(meta, du_total)),
             "realizado": arred(real),
-            "pct_atingido": arred(safe_div(real, meta) * 100),
-            "mtd": arred(mtd), "deficit_mtd": arred(mtd - real),
-            "pct_mtd": arred(safe_div(real, mtd) * 100),
+            "pct_atingido": arred(m3.atingimento(real, meta)),            # M3-B
+            "mtd": arred(mtd["meta_mtd"]), "deficit_mtd": arred(mtd["gap"]),
+            "pct_mtd": arred(mtd["pct"]),
             "deficit_meta": arred(meta - real),
+            # meta/dia restante: sem regra na CRN ainda (pendência T1)
             "meta_dia_100": arred(safe_div(meta - real, du_rest)) if du_rest else 0,
-            "realizado_multi": arred(real_multi),
-            "pct_atingido_multi": arred(safe_div(real_multi, meta) * 100),
-            "deficit_meta_multi": arred(meta - real_multi),
-            "meta_dia_multi": arred(safe_div(meta - real_multi, du_rest)) if du_rest else 0,
-            "qtd_ganhos": qtd,
-            "ticket_medio": arred(safe_div(real, qtd)) if qtd else 0,
+            "realizado_multi": arred(multi),
+            "pct_atingido_multi": arred(m3.atingimento(multi, meta)),     # M3-M
+            "deficit_meta_multi": arred(meta - multi),
+            "meta_dia_multi": arred(safe_div(meta - multi, du_rest)) if du_rest else 0,
+            "qtd_ganhos": len(deals),
+            "ticket_medio": arred(m2.ticket_medio(deals)),
             "referidos": refs,
-            "reunioes_closer": reu,
+            "_deals": deals, "_meta": meta,
         }
 
-    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-    lider_nomes = set()
-    if lider_col:
-        for _, row in colab_df.iterrows():
-            lider_nome  = norm(str(row.get(lider_col, "")))
-            membro_nome = norm(str(row.get(nome_col, "")))
-            if lider_nome and lider_nome != membro_nome:
-                lider_nomes.add(lider_nome)
-
     squads = {}
+    def get_squad(sq):
+        return squads.setdefault(sq, {"nome": sq, "closers_ind": [], "sdrs_ind": []})
 
-    def get_squad(sub):
-        if sub not in squads:
-            squads[sub] = {"nome": sub, "closers_ind": [], "sdrs_ind": []}
-        return squads[sub]
+    # Closers/IS com meta (R2)
+    usados = set()
+    for m in metas:
+        if m["papel"] != "closer": continue
+        p = pessoa.get(m["nome_norm"])
+        if not p or not p["squad"] or not visivel(p["squad"]): continue
+        nn, sq = m["nome_norm"], p["squad"]
+        usados.add((sq, nn))
+        get_squad(sq)["closers_ind"].append(
+            linha_closer(m["nome"], m["meta_financeira"], deals_sq.get((sq, nn), []), refs=D["referidos"].get(nn, 0)))
+    # Todo dono na Colab que vendeu e não tem meta naquele squad (M1)
+    for (sq, nn), deals in deals_sq.items():
+        if (sq, nn) in usados or not visivel(sq, nn): continue
+        p = pessoa.get(nn)
+        lider = p is not None and h1.nivel(p, colab) != "membro"
+        get_squad(sq)["closers_ind"].append(
+            linha_closer(nome_de.get(nn, nn), 0, deals, is_head=lider, refs=D["referidos"].get(nn, 0)))
 
-    for m in closers_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
-        ri  = closer_real.get(nn, {"valor": 0, "valor_multi": 0, "qtd": 0})
-        uid_c = nome_norm_to_uid.get(nn)
-        uid_c_str = str(uid_c) if uid_c else ""
-        reu_c = contar_reu_closer(uid_c_str, sub)
-        get_squad(sub)["closers_ind"].append(
-            build_closer_row(m["nome"], m["meta_fin"], ri["valor"], ri["valor_multi"], ri["qtd"], refs=referidos.get(nn, 0), reu=reu_c)
-        )
+    # SDRs (R2: meta de reunião > 0)
+    def linha_sdr(nome, sq, meta_reu, meta_fin, uid, nn, lider_nome, is_lider=False):
+        validadas = D["reunioes"].get(uid, []) if uid is not None else []
+        deals_sdr = D["por_sdr"].get(nn, [])
+        bruto, multi = m5.bruto(deals_sdr), m5.multiplicador(deals_sdr)
+        pct_reu = m6.pct_reunioes(len(validadas), meta_reu)
+        pct_fin = m5.pct_financeiro(multi, meta_fin)                       # M5-M
+        dev = t1.mtd(0, meta_reu, du_total, du_pass)["meta_mtd"]          # meta MTD (mesma conta da T1/T2)
+        return {
+            "nome": nome, "subarea": sq, "lider": lider_nome, "is_lider": is_lider,
+            "meta_reuniao": meta_reu, "meta_diaria": arred(safe_div(meta_reu, du_total)),
+            "validadas": len(validadas), "deveria_estar": arred(dev),
+            "faltam": arred(dev - len(validadas)), "pct_reu": arred(pct_reu),
+            "meta_ganho": arred(meta_fin), "qtd_ganhos": len(deals_sdr),
+            "valor_ganho": arred(bruto), "valor_ganho_multi": arred(multi),
+            "pct_ganhos": arred(pct_fin),
+            "ticket_medio": arred(m2.ticket_medio(deals_sdr)),
+            "pct_final": arred(m7.pct_final(pct_reu, pct_fin, ref)) if not is_lider else 0.0,   # M7-M
+            "reunioes_detalhes": [{
+                "titulo": D["titulos"].get(a.get("deal_id"), "—"), "deal_id": a.get("deal_id"),
+                "data_reuniao": str(atividade_dia(a) or ""), "subject": a.get("subject", ""),
+                "sdr": nome, "squad": sq,
+            } for a in validadas],
+        }
 
-    for uid, uname in users_pipe.items():
-        nn      = norm(uname)
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub, nn): continue
-        if nn not in closer_real: continue
-        is_head_of    = any(nome_to_head.get(n2, "") == nn for n2 in nome_to_subarea)
-        is_lider_of   = nn in lider_nomes and nn not in team_leaders
-        is_tl_sem_sdr = nn in team_leaders and norm(own_sub) in SQUADS_SEM_SDR
-        if not is_head_of and not is_lider_of and not is_tl_sem_sdr: continue
-        existing = [norm(c["nome"]) for c in squads.get(own_sub, {}).get("closers_ind", [])]
-        if nn in existing: continue
-        ri = closer_real[nn]
-        uid_h_str = str(uid)
-        reu_h = contar_reu_closer(uid_h_str, own_sub)
-        get_squad(own_sub)["closers_ind"].append(
-            build_closer_row(uname, 0, ri["valor"], ri["valor_multi"], ri["qtd"], is_head=True, refs=referidos.get(nn, 0), reu=reu_h)
-        )
+    for m in metas:
+        if m["papel"] != "sdr": continue
+        nn = m["nome_norm"]; p = pessoa.get(nn)
+        if not p or not p["squad"] or not visivel(p["squad"], nn): continue
+        lid = p["lider_norm"]
+        get_squad(p["squad"])["sdrs_ind"].append(linha_sdr(
+            m["nome"], p["squad"], m["meta_reunioes"], m["meta_financeira"],
+            D["nn_para_uid"].get(nn), nn, nome_de.get(lid, lid)))
 
-    # SDRs — usa criador da atividade para squads em SQUADS_CRIADOR
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub, nn): continue
-        if nn in EXCLUIR_REU_SDR: continue  # nunca aparece como SDR (heads, gerentes, etc)
-        meta_reu = m["meta_reu"]
-        meta_fin = m["meta_fin"]
-        uid      = nome_norm_to_uid.get(nn)
-        uid_str  = str(uid) if uid else ""
+    # Líderes e heads sem linha em Metas que fizeram reunião ou têm ganho como qualificador (R2)
+    for p in colab:
+        nn = p["nome_norm"]
+        if nn in meta_de and meta_de[nn]["papel"] is not None: continue
+        if h1.nivel(p, colab) == "membro" or not p["squad"]: continue
+        if norm(p["squad"]) in SQUADS_SEM_SDR or not visivel(p["squad"], nn): continue
+        linha = linha_sdr(p["nome"], p["squad"], 0, 0, D["nn_para_uid"].get(nn), nn, p["nome"], is_lider=True)
+        if linha["validadas"] == 0 and linha["qtd_ganhos"] == 0: continue
+        get_squad(p["squad"])["sdrs_ind"].append(linha)
 
-        acts_sdr = acts_by_owner.get(uid_str, [])
-        validadas = [a for a in acts_sdr if act_valida(a, sub)]
-        qtd_val = len(validadas)
-        deveria_estar = arred(safe_div(meta_reu, du_total) * du_pass)
-        pct_reu       = arred(safe_div(qtd_val, meta_reu) * 100)
-        qual_id       = qual_ids.get(nn)
-        deals_sdr     = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
-        qtd_ganhos    = len(deals_sdr)
-        valor_ganho   = sum(float(d.get("value") or 0) for d in deals_sdr)
-        valor_multi   = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
-        pct_ganhos    = arred(safe_div(valor_multi, meta_fin) * 100)
-        pct_final     = arred(pct_reu * PESO_REU + pct_ganhos * PESO_FIN)
-        lider_nn_sdr = nome_to_lider.get(norm(m["nome"]), "")
-        lider_nome_sdr = next((name for nn2, name in [(norm(n), n) for n in [r.get(nome_col,"") for _, r in colab_df.iterrows()]] if nn2 == lider_nn_sdr), lider_nn_sdr)
-        reunioes_detalhes = [{
-            "titulo": mapa_deal_titulo.get(a.get("deal_id"), "—"),
-            "deal_id": a.get("deal_id"),
-            "data_reuniao": str(a.get("due_date", "") or "")[:10],
-            "subject": a.get("subject", ""),
-            "sdr": m["nome"],
-            "squad": sub,
-        } for a in validadas]
-        get_squad(sub)["sdrs_ind"].append({
-            "nome": m["nome"], "subarea": sub,
-            "lider": lider_nome_sdr,
-            "meta_reuniao": meta_reu,
-            "meta_diaria": arred(safe_div(meta_reu, du_total)),
-            "validadas": qtd_val,
-            "deveria_estar": deveria_estar,
-            "faltam": arred(deveria_estar - qtd_val),
-            "pct_reu": pct_reu,
-            "meta_ganho": arred(meta_fin),
-            "qtd_ganhos": qtd_ganhos,
-            "valor_ganho": arred(valor_ganho),
-            "valor_ganho_multi": arred(valor_multi),
-            "pct_ganhos": pct_ganhos,
-            "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
-            "pct_final": pct_final,
-            "reunioes_detalhes": reunioes_detalhes,
-        })
-
-    sdr_nomes_ja = {norm(s["nome"]) for sq in squads.values() for s in sq["sdrs_ind"]}
-
-    # Líderes/Team Leaders que fizeram reuniões mas não têm meta SDR
-    # (ex: Stephanie, Mylena — aparecem na seção SDR com is_lider=True, sem meta)
-    team_leaders_set = set()
-    if lider_col:
-        for _, row in colab_df.iterrows():
-            nn_row  = norm(str(row.get(nome_col, "")))
-            lid_row = norm(str(row.get(lider_col, "")))
-            if nn_row == lid_row and nn_row:
-                team_leaders_set.add(nn_row)
-
-    # Set global para evitar duplicatas no bloco TL — atualizado após cada append
-    nomes_tl_adicionados = {norm(s["nome"]) for sq2 in squads.values() for s in sq2["sdrs_ind"]}
-
-    for uid, uname in users_pipe.items():
-        nn  = norm(uname)
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub, nn): continue
-        if nn in sdr_nomes_ja: continue
-        if nn not in team_leaders_set: continue
-        if nn in EXCLUIR_REU_SDR: continue  # ex: Denise — não aparece como SDR
-        if nn in nomes_tl_adicionados: continue  # evita duplicata
-        uid_str = str(uid)
-        acts_tl  = acts_by_owner.get(uid_str, [])
-        validadas_tl = [a for a in acts_tl if act_valida(a, sub)]
-        qtd_tl = len(validadas_tl)
-        if qtd_tl == 0: continue
-        # Financeiro via qualificador
-        qual_id_tl = qual_ids.get(nn)
-        deals_tl   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id_tl)] if qual_id_tl else []
-        valor_tl   = sum(float(d.get("value") or 0) for d in deals_tl)
-        valor_multi_tl = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_tl)
-        reunioes_detalhes_tl = [{
-            "titulo": mapa_deal_titulo.get(a.get("deal_id"), "—"),
-            "deal_id": a.get("deal_id"),
-            "data_reuniao": str(a.get("due_date", "") or "")[:10],
-            "subject": a.get("subject", ""),
-            "sdr": uname,
-            "squad": sub,
-        } for a in validadas_tl]
-        get_squad(sub)["sdrs_ind"].append({
-            "nome": uname, "subarea": sub,
-            "lider": uname,
-            "is_lider": True,
-            "meta_reuniao": 0, "meta_diaria": 0,
-            "validadas": qtd_tl, "deveria_estar": 0, "faltam": 0,
-            "pct_reu": 0,
-            "meta_ganho": 0, "qtd_ganhos": len(deals_tl),
-            "valor_ganho": arred(valor_tl), "valor_ganho_multi": arred(valor_multi_tl),
-            "pct_ganhos": 0, "ticket_medio": arred(safe_div(valor_tl, len(deals_tl))) if deals_tl else 0,
-            "pct_final": 0,
-            "reunioes_detalhes": reunioes_detalhes_tl,
-        })
-        nomes_tl_adicionados.add(nn)
-    for uid, uname in users_pipe.items():
-        nn = norm(uname)
-        if nn not in lider_nomes and nn not in team_leaders: continue
-        if nn in sdr_nomes_ja: continue
-        if nn not in team_leaders: continue
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
-        if norm(own_sub) in SQUADS_SEM_SDR: continue
-        uid_str = str(uid)
-
-        acts_sdr = acts_by_owner.get(uid_str, [])
-
-        validadas   = [a for a in acts_sdr if act_valida(a, own_sub)]
-        qtd_val     = len(validadas)
-        qual_id     = qual_ids.get(nn)
-        deals_sdr   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
-        qtd_ganhos  = len(deals_sdr)
-        valor_ganho = sum(float(d.get("value") or 0) for d in deals_sdr)
-        valor_multi = sum(float(cf(d, CF_MULTIPLICADOR) or 0) for d in deals_sdr)
-        if qtd_val == 0 and qtd_ganhos == 0: continue
-        reunioes_detalhes_tl2 = [{
-            "titulo": mapa_deal_titulo.get(a.get("deal_id"), "—"),
-            "deal_id": a.get("deal_id"),
-            "data_reuniao": str(a.get("due_date", "") or "")[:10],
-            "subject": a.get("subject", ""),
-            "sdr": uname,
-            "squad": own_sub,
-        } for a in validadas]
-        get_squad(own_sub)["sdrs_ind"].append({
-            "nome": uname, "subarea": own_sub, "is_lider": True,
-            "meta_reuniao": 0, "meta_diaria": 0,
-            "validadas": qtd_val, "deveria_estar": 0,
-            "faltam": 0, "pct_reu": 0, "meta_ganho": 0,
-            "qtd_ganhos": qtd_ganhos,
-            "valor_ganho": arred(valor_ganho),
-            "valor_ganho_multi": arred(valor_multi),
-            "pct_ganhos": 0,
-            "ticket_medio": arred(safe_div(valor_ganho, qtd_ganhos)) if qtd_ganhos else 0,
-            "pct_final": 0.0,
-            "reunioes_detalhes": reunioes_detalhes_tl2,
-        })
-
-    def total_closers(ind):
+    def total_closers(ind, sq):
         if not ind: return None
-        t_meta = sum(c["meta"] for c in ind)
-        t_real = sum(c["realizado"] for c in ind)
-        t_multi= sum(c["realizado_multi"] for c in ind)
-        t_qtd  = sum(c["qtd_ganhos"] for c in ind)
-        t_refs = sum(c.get("referidos", 0) for c in ind)
-        t_reu  = sum(c.get("reunioes_closer", 0) for c in ind)
-        return build_closer_row("TOTAL", t_meta, t_real, t_multi, t_qtd, refs=t_refs, reu=t_reu)
+        deals = [d for c in ind for d in c["_deals"]]
+        meta = sum(c["_meta"] for c in ind)
+        if norm(sq) == SQUAD_ASCENSAO:
+            meta = as3.meta_time(metas)                                    # AS3: linha da gestora
+        t = linha_closer("TOTAL", meta, deals)
+        t["referidos"] = sum(c.get("referidos", 0) for c in ind)
+        return t
 
     def total_sdrs(ind):
         if not ind: return None
-        t_reu  = sum(s["meta_reuniao"] for s in ind)
-        t_val  = sum(s["validadas"] for s in ind)
-        t_dev  = sum(s["deveria_estar"] for s in ind)
-        t_mg   = sum(s["meta_ganho"] for s in ind)
-        t_ganho= sum(s["valor_ganho"] for s in ind)
-        t_multi= sum(s["valor_ganho_multi"] for s in ind)
-        t_qtd  = sum(s["qtd_ganhos"] for s in ind)
-        pct_r  = arred(safe_div(t_val, t_reu) * 100)
-        pct_g  = arred(safe_div(t_multi, t_mg) * 100)
+        t_reu = sum(s["meta_reuniao"] for s in ind); t_val = sum(s["validadas"] for s in ind)
+        t_dev = sum(s["deveria_estar"] for s in ind); t_mg = sum(s["meta_ganho"] for s in ind)
+        t_bruto = sum(s["valor_ganho"] for s in ind); t_multi = sum(s["valor_ganho_multi"] for s in ind)
+        t_qtd = sum(s["qtd_ganhos"] for s in ind)
+        pct_r, pct_g = m6.pct_reunioes(t_val, t_reu), m5.pct_financeiro(t_multi, t_mg)
         return {
             "nome": "TOTAL", "subarea": "",
-            "meta_reuniao": t_reu,
-            "meta_diaria": arred(safe_div(t_reu, du_total)),
-            "validadas": t_val, "deveria_estar": arred(t_dev),
-            "faltam": arred(t_dev - t_val),
-            "pct_reu": pct_r, "meta_ganho": arred(t_mg),
-            "qtd_ganhos": t_qtd, "valor_ganho": arred(t_ganho),
-            "valor_ganho_multi": arred(t_multi),
-            "pct_ganhos": pct_g,
-            "ticket_medio": arred(safe_div(t_ganho, t_qtd)) if t_qtd else 0,
-            "pct_final": arred(pct_r * PESO_REU + pct_g * PESO_FIN),
+            "meta_reuniao": t_reu, "meta_diaria": arred(safe_div(t_reu, du_total)),
+            "validadas": t_val, "deveria_estar": arred(t_dev), "faltam": arred(t_dev - t_val),
+            "pct_reu": arred(pct_r), "meta_ganho": arred(t_mg),
+            "qtd_ganhos": t_qtd, "valor_ganho": arred(t_bruto), "valor_ganho_multi": arred(t_multi),
+            "pct_ganhos": arred(pct_g),
+            "ticket_medio": arred(safe_div(t_bruto, t_qtd)) if t_qtd else 0,
+            "pct_final": arred(m7.pct_final(pct_r, pct_g, ref)),           # A1-M Sniper: 70/30 sobre os totais
         }
 
-    # Dedup + filtro final por pessoas_visiveis
-    for sub, sq in squads.items():
-        seen_sdrs = set()
-        deduped = []
+    # Dedup de SDR + filtro final de pessoas (comportamento anterior)
+    for sq in squads.values():
+        vistos, saida = set(), []
         for s in sq["sdrs_ind"]:
-            nn_s = norm(s["nome"])
-            if nn_s in seen_sdrs:
-                continue
-            # Se há filtro de pessoas, garante que só passam os visíveis
-            if pessoas_visiveis is not None and nn_s not in pessoas_visiveis:
-                continue
-            seen_sdrs.add(nn_s)
-            deduped.append(s)
-        sq["sdrs_ind"] = deduped
+            k = norm(s["nome"])
+            if k in vistos or (pessoas_vis is not None and k not in pessoas_vis): continue
+            vistos.add(k); saida.append(s)
+        sq["sdrs_ind"] = saida
 
-    squads_final = {}
-    lic_closers = []
-    lic_sdrs    = []
-    for sub, sq in squads.items():
-        if sub.upper().startswith("LIC"):
-            lic_closers.extend(sq["closers_ind"])
-            lic_sdrs.extend(sq["sdrs_ind"])
-        else:
-            squads_final[sub] = sq
+    squads_final = {k: v for k, v in squads.items() if not eh_lic(k)}      # Licenciados fora (recorte)
 
-    # Injeta vendas da Denise em cada squad pelo funil
+    squads_result, squads_out = [], []
     for sub, sq in squads_final.items():
-        sub_display = display_squad(sub)
-        di = denise_por_squad.get(sub_display)
-        if not di: continue
-        # Adiciona como entrada virtual no closer_real para que total_closers some corretamente
-        # Cria linha virtual da Denise nesse squad
-        sq["closers_ind"].append(
-            build_closer_row("Denise Mussolin*", 0, di["valor"], di["valor_multi"], di["qtd"], is_head=True)
-        )
-    # Licenciados removidos de todas as abas conforme solicitado
-    # if lic_closers or lic_sdrs:
-    #     squads_final["Licenciados"] = {"nome": "Licenciados", ...}
-
-    all_closers_ind = [c for sq in squads_final.values() for c in sq["closers_ind"]]
-    all_sdrs_ind    = [s for sq in squads_final.values() for s in sq["sdrs_ind"]]
-    total_geral_c   = total_closers(all_closers_ind)
-    total_geral_s   = total_sdrs(all_sdrs_ind)
-
-    # Squads 100% SDR (sem closers no resultado) e 100% Closer (sem SDR no resultado)
-    SQUADS_100_SDR_SET    = {"sniper"}
-    SQUADS_100_CLOSER_SET = {"elite", "olympus", "mgm", "latam", "orion", "ascensão", "ascensao"}
-
-    EXCLUIR_CARDS = {"inteligencia comercial", "inteligência comercial", "int. comercial"}
-    squads_result = []
-    for sub, sq in squads_final.items():
-        if norm(display_squad(sub)) in EXCLUIR_CARDS: continue
-        tc = total_closers(sq["closers_ind"])
-        ts = total_sdrs(sq["sdrs_ind"])
-        ating_closer = tc["pct_atingido_multi"] if tc else 0
-        ating_sdr    = ts["pct_final"] if ts else None
-        sub_norm = norm(display_squad(sub))
-        if sub_norm in SQUADS_100_SDR_SET:
-            # 100% SDR — resultado = pct_final_sdr
-            resultado = ating_sdr if ating_sdr is not None else 0
-        elif sub_norm in SQUADS_100_CLOSER_SET:
-            # 100% Closer — resultado = pct_atingido_closer
-            resultado = ating_closer
-        else:
-            # Misto — média
-            resultado = arred((ating_closer + ating_sdr) / 2) if ating_sdr is not None else ating_closer
-        tem_closer_flag = sub_norm not in SQUADS_100_SDR_SET
-        tem_sdr_flag    = ts is not None and sub_norm not in SQUADS_100_CLOSER_SET
+        tc, ts = total_closers(sq["closers_ind"], sub), total_sdrs(sq["sdrs_ind"])
+        squads_out.append({"nome": sub, "closers": sq["closers_ind"], "closer_total": tc,
+                           "sdrs": sq["sdrs_ind"], "sdr_total": ts})
+        if norm(sub) in EXCLUIR_CARDS: continue
+        so_sdr = a1.squad_so_sdr(sub)
+        ating_closer = a1.resultado_financeiro([tc["realizado_multi"]], [tc["_meta"]]) if tc else None   # A1-M
+        ating_sdr = ts["pct_final"] if ts else None
+        resultado = ating_sdr if so_sdr else ating_closer
         squads_result.append({
-            "nome": display_squad(sq.get("nome", sub)),
-            "ating_closer": arred(ating_closer),
-            "ating_sdr": arred(ating_sdr) if ating_sdr is not None else None,
+            "nome": sub,
+            "ating_closer": arred(ating_closer), "ating_sdr": arred(ating_sdr) if ating_sdr is not None else None,
             "resultado": arred(resultado),
-            "tem_sdr": tem_sdr_flag,
-            "tem_closer": tem_closer_flag,
-            "closer_meta":    arred(tc["meta"]) if tc else 0,
-            "closer_mtd":     arred(tc["mtd"]) if tc else 0,
-            "closer_pct_mtd": arred(tc["pct_mtd"]) if tc else 0,
-            "closer_bruto":   arred(tc["realizado"]) if tc else 0,
-            "closer_multi":   arred(tc["realizado_multi"]) if tc else 0,
-            "closer_vol":     tc["qtd_ganhos"] if tc else 0,
-            "closer_refs":    tc.get("referidos", 0) if tc else 0,
-            "sdr_meta_reu":  arred(ts["meta_reuniao"]) if ts else 0,
-            "sdr_meta_fin":  arred(ts["meta_ganho"]) if ts else 0,
-            "sdr_bruto":     arred(ts["valor_ganho"]) if ts else 0,
-            "sdr_multi":     arred(ts["valor_ganho_multi"]) if ts else 0,
-            "sdr_reunioes":  ts["validadas"] if ts else 0,
+            "tem_sdr": so_sdr and ts is not None, "tem_closer": not so_sdr,
+            "closer_meta": arred(tc["_meta"]) if tc else 0, "closer_mtd": tc["mtd"] if tc else 0,
+            "closer_pct_mtd": tc["pct_mtd"] if tc else 0, "closer_bruto": tc["realizado"] if tc else 0,
+            "closer_multi": tc["realizado_multi"] if tc else 0, "closer_vol": tc["qtd_ganhos"] if tc else 0,
+            "closer_refs": tc["referidos"] if tc else 0,
+            "sdr_meta_reu": arred(ts["meta_reuniao"]) if ts else 0, "sdr_meta_fin": ts["meta_ganho"] if ts else 0,
+            "sdr_bruto": ts["valor_ganho"] if ts else 0, "sdr_multi": ts["valor_ganho_multi"] if ts else 0,
+            "sdr_reunioes": ts["validadas"] if ts else 0,
         })
 
-    squads_out = []
-    for sub, sq in squads_final.items():
-        tc = total_closers(sq["closers_ind"])
-        ts = total_sdrs(sq["sdrs_ind"])
-        squads_out.append({
-            "nome": display_squad(sq.get("nome", sub)),
-            "closers": sq["closers_ind"],
-            "closer_total": tc,
-            "sdrs": sq["sdrs_ind"],
-            "sdr_total": ts,
-        })
+    def soma(lst, k): return sum(r.get(k, 0) or 0 for r in lst)
 
-    DENISE_SQUADS = {"elite", "sniper", "mgm", "olympus", "ascensão", "ascensao"}
-    denise_squads = [r for r in squads_result if norm(r["nome"]) in DENISE_SQUADS]
-    if denise_squads:
-        # Denise = 100% financeiro (closer) — gerente de Ascensão
-        closer_squads = [r for r in denise_squads]
-        d_closer = arred(safe_div(sum(sq["ating_closer"] for sq in closer_squads), len(closer_squads))) if closer_squads else 0
-        d_sdr = None
-        d_resultado = d_closer
+    # Consolidado da Denise — PROVISÓRIO (fora da CRN até a FT1); média como era
+    den = [r for r in squads_result if norm(r["nome"]) in DENISE_SQUADS]
+    if den:
+        d_closer = arred(safe_div(soma(den, "ating_closer"), len(den)))
         squads_result.append({
-            "nome": "Denise Mussolin", "ating_closer": d_closer, "ating_sdr": d_sdr,
-            "resultado": d_resultado, "tem_sdr": d_sdr is not None, "is_consolidated": True,
-            "closer_meta":   arred(sum(sq.get("closer_meta", 0) for sq in denise_squads)),
-            "closer_mtd":    arred(sum(sq.get("closer_mtd", 0) for sq in denise_squads)),
-            "closer_pct_mtd": arred(safe_div(sum(sq.get("closer_bruto", 0) for sq in denise_squads), sum(sq.get("closer_mtd", 0) for sq in denise_squads)) * 100) if sum(sq.get("closer_mtd", 0) for sq in denise_squads) else 0,
-            "closer_bruto":  arred(sum(sq.get("closer_bruto", 0) for sq in denise_squads)),
-            "closer_multi":  arred(sum(sq.get("closer_multi", 0) for sq in denise_squads)),
-            "closer_vol":    sum(sq.get("closer_vol", 0) for sq in denise_squads),
-            "closer_refs":   sum(sq.get("closer_refs", 0) for sq in denise_squads),
-            "sdr_meta_reu":  sum(sq.get("sdr_meta_reu", 0) for sq in denise_squads),
-            "sdr_meta_fin":  arred(sum(sq.get("sdr_meta_fin", 0) for sq in denise_squads)),
-            "sdr_bruto":     arred(sum(sq.get("sdr_bruto", 0) for sq in denise_squads)),
-            "sdr_multi":     arred(sum(sq.get("sdr_multi", 0) for sq in denise_squads)),
-            "sdr_reunioes":  sum(sq.get("sdr_reunioes", 0) for sq in denise_squads),
+            "nome": "Denise Mussolin", "ating_closer": d_closer, "ating_sdr": None, "resultado": d_closer,
+            "tem_sdr": False, "is_consolidated": True, "provisorio": True,
+            "closer_meta": arred(soma(den, "closer_meta")), "closer_mtd": arred(soma(den, "closer_mtd")),
+            "closer_pct_mtd": arred(safe_div(soma(den, "closer_bruto"), soma(den, "closer_mtd")) * 100) if soma(den, "closer_mtd") else 0,
+            "closer_bruto": arred(soma(den, "closer_bruto")), "closer_multi": arred(soma(den, "closer_multi")),
+            "closer_vol": soma(den, "closer_vol"), "closer_refs": soma(den, "closer_refs"),
+            "sdr_meta_reu": soma(den, "sdr_meta_reu"), "sdr_meta_fin": arred(soma(den, "sdr_meta_fin")),
+            "sdr_bruto": arred(soma(den, "sdr_bruto")), "sdr_multi": arred(soma(den, "sdr_multi")),
+            "sdr_reunioes": soma(den, "sdr_reunioes"),
         })
 
-    # ── Card Total Geral (exclui Zenite e Licenciados) ──
-    EXCLUIR_GERAL = {"zenite", "licenciados", "inteligencia comercial"}
-    squads_para_geral = [r for r in squads_result
-                         if norm(r["nome"]) not in EXCLUIR_GERAL
-                         and not r.get("is_consolidated")]
-    if squads_para_geral:
-        tg_closer   = arred(safe_div(sum(r["ating_closer"] for r in squads_para_geral), len(squads_para_geral)))
-        tg_sdr_vals = [r["ating_sdr"] for r in squads_para_geral if r.get("ating_sdr") is not None]
-        tg_sdr      = arred(sum(tg_sdr_vals) / len(tg_sdr_vals)) if tg_sdr_vals else None
-        tg_resultado= arred((tg_closer + tg_sdr) / 2) if tg_sdr is not None else tg_closer
+    # Total Geral — A1-M: Σ realizado c/ mult ÷ Σ metas de Closers/IS (J2/AS3 por squad); sem 70/30 do Sniper
+    geral = [r for r in squads_result if norm(r["nome"]) not in EXCLUIR_GERAL and not r.get("is_consolidated")]
+    if geral:
+        tg = a1.resultado_financeiro([r["closer_multi"] for r in geral], [r["closer_meta"] for r in geral])
         squads_result.append({
-            "nome": "Total Geral",
-            "ating_closer": tg_closer,
-            "ating_sdr": tg_sdr,
-            "resultado": tg_resultado,
-            "tem_sdr": tg_sdr is not None,
-            "is_total_geral": True,
-            "closer_meta":   arred(sum(r.get("closer_meta",0) for r in squads_para_geral)),
-            "closer_mtd":    arred(sum(r.get("closer_mtd",0) for r in squads_para_geral)),
-            "closer_pct_mtd": arred(safe_div(sum(r.get("closer_bruto",0) for r in squads_para_geral), sum(r.get("closer_mtd",0) for r in squads_para_geral))*100) if sum(r.get("closer_mtd",0) for r in squads_para_geral) else 0,
-            "closer_bruto":  arred(sum(r.get("closer_bruto",0) for r in squads_para_geral)),
-            "closer_multi":  arred(sum(r.get("closer_multi",0) for r in squads_para_geral)),
-            "closer_vol":    sum(r.get("closer_vol",0) for r in squads_para_geral),
-            "closer_refs":   sum(r.get("closer_refs",0) for r in squads_para_geral),
-            "sdr_meta_reu":  sum(r.get("sdr_meta_reu",0) for r in squads_para_geral),
-            "sdr_meta_fin":  arred(sum(r.get("sdr_meta_fin",0) for r in squads_para_geral)),
-            "sdr_bruto":     arred(sum(r.get("sdr_bruto",0) for r in squads_para_geral)),
-            "sdr_multi":     arred(sum(r.get("sdr_multi",0) for r in squads_para_geral)),
-            "sdr_reunioes":  sum(r.get("sdr_reunioes",0) for r in squads_para_geral),
+            "nome": "Total Geral", "ating_closer": arred(tg), "ating_sdr": None, "resultado": arred(tg),
+            "tem_sdr": False, "is_total_geral": True,
+            "closer_meta": arred(soma(geral, "closer_meta")), "closer_mtd": arred(soma(geral, "closer_mtd")),
+            "closer_pct_mtd": arred(safe_div(soma(geral, "closer_bruto"), soma(geral, "closer_mtd")) * 100) if soma(geral, "closer_mtd") else 0,
+            "closer_bruto": arred(soma(geral, "closer_bruto")), "closer_multi": arred(soma(geral, "closer_multi")),
+            "closer_vol": soma(geral, "closer_vol"), "closer_refs": soma(geral, "closer_refs"),
+            "sdr_meta_reu": soma(geral, "sdr_meta_reu"), "sdr_meta_fin": arred(soma(geral, "sdr_meta_fin")),
+            "sdr_bruto": arred(soma(geral, "sdr_bruto")), "sdr_multi": arred(soma(geral, "sdr_multi")),
+            "sdr_reunioes": soma(geral, "sdr_reunioes"),
         })
 
+    all_c = [c for sq in squads_final.values() for c in sq["closers_ind"]]
+    all_s = [s for sq in squads_final.values() for s in sq["sdrs_ind"]]
     return {
-        "periodo": {
-            "mes": mes, "ano": ano,
-            "du_total": du_total, "du_passados": du_pass, "du_restantes": du_rest,
-            "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
-        },
+        "periodo": {"mes": mes, "ano": ano, "du_total": du_total, "du_passados": du_pass,
+                    "du_restantes": du_rest, "atualizado_em": agora_str()},
         "squads": squads_out,
         "resultados": squads_result,
-        "total_geral": {"closer": total_geral_c, "sdr": total_geral_s},
+        "total_geral": {"closer": total_closers(all_c, ""), "sdr": total_sdrs(all_s)},
+        "carimbo": carimbo("Eixo: data de ganho (vendas) e data da reunião (reuniões) · Resultado: c/ multiplicador; "
+                           "MTD bruto · Recorte: com meta + líderes; realizado do squad = todo dono na Colab · "
+                           "Squads: todos exc. Licenciados; Total Geral exc. Zenite e Int. Comercial · "
+                           "Consolidado Denise: provisório"),
     }
 
-# ── ROTAS ─────────────────────────────────────────────────────
+# ── ROTAS BÁSICAS ─────────────────────────────────────────────
 @app.route("/")
 def index():
     return redirect("/login" if "nome" not in session else "/abril")
@@ -1040,9 +438,7 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        usuario = request.form.get("usuario", "").strip()
-        senha   = request.form.get("senha",   "").strip()
-        nome    = buscar_usuario(usuario, senha)
+        nome = buscar_usuario(request.form.get("usuario", "").strip(), request.form.get("senha", "").strip())
         if nome:
             session["nome"] = nome
             return redirect("/abril")
@@ -1058,1544 +454,365 @@ def logout():
 def abril():
     if "nome" not in session: return redirect("/login")
     nome_s = session["nome"]
-    is_denise_render = norm(nome_s) == DENISE_NORM
-    return render_template("abril.html", nome=nome_s, is_master=is_master(nome_s), is_denise=is_denise_render)
+    return render_template("abril.html", nome=nome_s, is_master=is_master(nome_s), is_denise=norm(nome_s) == DENISE_NORM)
 
 @app.route("/api/abril")
 def api_abril():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
     try:
-        mes  = request.args.get("mes", type=int)
-        ano  = request.args.get("ano", type=int)
-        nome_sess = session.get("nome", "")
-        colab_df  = buscar_colaboradores()
-        head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
-        nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        nn_sess = norm(nome_sess)
-        if nn_sess in superusers:
-            head_filter = None
-        elif nn_sess == DENISE_NORM:
-            head_filter = "__denise__"
-        else:
-            is_head = False
-            if head_col:
-                for _, row in colab_df.iterrows():
-                    if norm(str(row.get(head_col, ""))) == nn_sess:
-                        is_head = True
-                        break
-            if is_head:
-                head_filter = nome_sess
-            else:
-                lider_col_l = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                is_lider = False
-                lider_sub = None
-                sub_col_l = next((c for c in colab_df.columns if norm(c) == "subarea"), "Subarea")
-                if lider_col_l:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col_l, ""))) == nn_sess:
-                            sub = str(row.get(sub_col_l, "")).strip()
-                            if sub:
-                                lider_sub = sub
-                                is_lider = True
-                            break
-                head_filter = f"__lider__:{nome_sess}" if is_lider else "__none__"
-        return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano, head_filter=head_filter)))
+        mes, ano = mes_ano_da_req()
+        hf = head_filter_da_sessao(session.get("nome", ""), fontes.carregar_colab(ano, mes))
+        return jsonify(limpar_nans(calcular_abril(mes=mes, ano=ano, head_filter=hf)))
     except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+        return erro_json(e)
 
 @app.route("/api/debug/metas")
 def debug_metas():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    hoje = date.today()
-    df = ler_sheet(URL_METAS)
-    return jsonify({"colunas": list(df.columns), "primeiras_5_linhas": df.head(5).fillna("").to_dict(orient="records"), "mes_ano": f"{hoje.month}/{hoje.year}"})
+    linhas = fontes.ler_csv("URL_METAS")
+    hoje = hoje_brasil()
+    return jsonify({"colunas": list(linhas[0].keys()) if linhas else [], "primeiras_5_linhas": linhas[:5],
+                    "mes_ano": f"{hoje.month}/{hoje.year}"})
 
 @app.route("/api/debug/colab")
 def debug_colab():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    df = ler_sheet(URL_COLAB)
-    return jsonify({"colunas": list(df.columns), "primeiras_5_linhas": df.head(5).fillna("").to_dict(orient="records")})
+    linhas = fontes.ler_csv("URL_COLAB")
+    return jsonify({"colunas": list(linhas[0].keys()) if linhas else [], "primeiras_5_linhas": linhas[:5]})
 
+# ── EXPORTAR GANHOS (CSV) ─────────────────────────────────────
 @app.route("/api/exportar-ganhos")
 def exportar_ganhos():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    import csv, io
     try:
-        mes = request.args.get("mes", type=int) or date.today().month
-        ano = request.args.get("ano", type=int) or date.today().year
-        deals = buscar_deals_mes(mes, ano)
-        resp_pipes = req.get(f"{BASE_V1}/pipelines", params={"api_token": API_KEY}, timeout=15)
-        pipes = {p["id"]: p["name"] for p in (resp_pipes.json().get("data") or [])}
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["ID","Título","Proprietário","Squad","Funil","Data Criação","Data Ganho","Valor Bruto","Valor c/ Multiplicador"])
-        colab_df  = buscar_colaboradores(mes=mes, ano=ano)
-        sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-        nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-        nome_to_sub = {norm(str(row.get(nome_col,""))): str(row.get(sub_col,"")).strip() for _, row in colab_df.iterrows()} if sub_col else {}
-        for d in deals:
-            uid = d.get("user_id")
-            owner = uid.get("name","") if isinstance(uid, dict) else ""
-            writer.writerow([d["id"], d.get("title",""), owner, nome_to_sub.get(norm(owner),""), pipes.get(d.get("pipeline_id"),""), str(d.get("add_time",""))[:10], won_time_br(d)[:10], f"R$ {float(d.get('value') or 0):,.0f}".replace(",","."), f"R$ {float(cf(d,CF_MULTIPLICADOR) or 0):,.0f}".replace(",",".")])
-        output.seek(0)
-        from flask import Response
-        return Response("\ufeff"+output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=ganhos_{mes:02d}_{ano}.csv"})
+        mes, ano = mes_ano_da_req()
+        D = carregar_mes(ano, mes)
+        squad_colab = {p["nome_norm"]: p["squad"] for p in D["colab"]}
+        squad_venda = {d_id: sq for info in D["por_closer"].values() for d_id, sq in info["squad_por_deal"].items()}
+        situacao = [("Válido", D["sep"]["validos"]), ("Cortesia (R4)", D["sep"]["cortesias"]),
+                    ("Outra moeda (R3)", D["sep"]["outra_moeda"]), ("Venda automática (G1)", D["sep"]["automaticos"])]
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["ID", "Título", "Proprietário", "Squad", "Funil", "Data Criação", "Data Ganho",
+                    "Moeda", "Valor Bruto", "Valor c/ Multiplicador", "Situação"])
+        for rotulo, deals in situacao:
+            for d in deals:
+                dono = m1.nome_dono(d, D["usuarios"])
+                if lc1.eh_licenciado(d, D["funis"]):
+                    sq = LICENCIADOS
+                else:
+                    sq = squad_venda.get(d.get("id")) or squad_colab.get(norm(dono), "")
+                w.writerow([d.get("id"), d.get("title", ""), dono, sq, D["funis"].get(d.get("pipeline_id"), ""),
+                            data_brasil(d.get("add_time")) or "", data_brasil(d.get("won_time")) or "",
+                            d.get("currency", ""),
+                            f"R$ {float(d.get('value') or 0):,.0f}".replace(",", "."),
+                            f"R$ {float(cf(d, campo('multiplicador')) or 0):,.0f}".replace(",", "."),
+                            rotulo])
+        return Response("﻿" + out.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename=ganhos_{mes:02d}_{ano}.csv"})
     except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+        return erro_json(e)
 
 # ── FORECAST DIÁRIO ───────────────────────────────────────────
-FILTER_FORECAST  = int(os.environ.get("FILTER_FORECAST",  "1490240"))
-FILTER_REFERIDOS = int(os.environ.get("FILTER_REFERIDOS", "1562285"))
+def _squad_do_deal(d, nome_squad, funis, usuarios):
+    if lc1.eh_licenciado(d, funis): return LICENCIADOS                     # LC1: pelo funil
+    return nome_squad.get(norm(m1.nome_dono(d, usuarios)), "")
 
-def buscar_deals_forecast():
-    todos, cursor = [], None
-    users_pipe = buscar_users_pipe()
-    while True:
-        params = {"filter_id": FILTER_FORECAST, "limit": 500}
-        if cursor: params["cursor"] = cursor
-        resp = req.get(f"{BASE_V2}/deals", params=params, headers={"x-api-token": API_KEY}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        for deal in lote:
-            oid = deal.get("owner_id")
-            deal["owner_name"] = users_pipe.get(oid, "") if oid else ""
-        todos.extend(lote)
-        cursor = (data.get("additional_data") or {}).get("next_cursor")
-        if not cursor or not lote: break
-    return todos
-
-def buscar_deals_ganhos_todos(mes=None, ano=None):
-    """Busca deals ganhos pelo FILTER_DEALS filtrando pelo mês (won_time UTC-3)."""
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-    mes_str = f"{ano}-{mes:02d}"
-    todos, start = [], 0
-    while True:
-        resp = req.get(f"{BASE_V1}/deals", params={
-            "filter_id": FILTER_DEALS, "status": "won",
-            "sort": "won_time DESC",
-            "limit": 500, "start": start, "api_token": API_KEY,
-        }, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        lote = data.get("data") or []
-        found_older = False
-        for deal in lote:
-            wt_br = won_time_br(deal)[:7]
-            if wt_br == mes_str:
-                todos.append(deal)
-            elif wt_br < mes_str:
-                found_older = True
-        mais = data.get("additional_data", {}).get("pagination", {}).get("more_items_in_collection", False)
-        if not mais or not lote or found_older: break
-        start += 500
-    return todos
-
-def calcular_forecast(head_filter=None, mes=None, ano=None):
-    from collections import defaultdict
-    hoje_fc = date.today()
-    mes_fc  = mes or hoje_fc.month
-    ano_fc  = ano or hoje_fc.year
-    colab_df  = buscar_colaboradores(mes=mes_fc, ano=ano_fc)
-    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
-    nome_to_subarea = {}
-    nome_to_head    = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        hd  = str(row.get(head_col, "")).strip() if head_col else ""
-        nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = norm(hd)
-    DENISE_SQ_VIS = {"sniper", "elite", "mgm", "olympus"}
+def calcular_forecast(head_filter=None):
+    hoje = hoje_brasil()
+    colab = fontes.carregar_colab(hoje.year, hoje.month)                    # F1: Colab do mês atual
+    usuarios = pipedrive.usuarios(); funis = pipedrive.funis()
+    nome_squad = {p["nome_norm"]: p["squad"] for p in colab}
+    por_nome = {p["nome_norm"]: p for p in colab}
+    visivel, _ = montar_visibilidade(head_filter, colab)
     if head_filter == "__denise__":
-        squads_visiveis = DENISE_SQ_VIS
-    elif head_filter and not head_filter.startswith("__"):
-        head_nn = norm(head_filter)
-        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items() if norm(nome_to_head.get(nn, "")) == head_nn and sub}
-    elif head_filter and head_filter.startswith("__lider__:"):
-        lider_nn_ext = norm(head_filter.replace("__lider__:", ""))
-        lider_col_ext = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-        lider_sub_ext = next((str(row.get(next((c for c in colab_df.columns if norm(c)=="subarea"), ""), "")).strip()
-                              for _, row in colab_df.iterrows()
-                              if norm(str(row.get(next((c for c in colab_df.columns if norm(c)=="nome"), "Nome"), ""))) == lider_nn_ext), None)
-        squads_visiveis = {norm(lider_sub_ext)} if lider_sub_ext else set()
-    elif head_filter and head_filter.startswith("__squad__:"):
-        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
+        visivel_sq = lambda sq: norm(sq) in DENISE_FC
     else:
-        squads_visiveis = None
-    deals = buscar_deals_forecast()
-    # Realizado: usa FILTER_DEALS (todas as vendas, qualquer etapa)
-    deals_ganhos_reais = buscar_deals_ganhos_todos(mes=hoje_fc.month, ano=hoje_fc.year)
-    pipes_fc      = buscar_pipelines()
-    users_pipe_fc = buscar_users_pipe()
-    uid_to_norm_fc = {uid: norm(name) for uid, name in users_pipe_fc.items()}
+        visivel_sq = lambda sq: visivel(sq)
 
-    # Helper: verifica se sub_key (display name) é visível para o usuário
-    # Necessário porque squads_visiveis tem nomes raw (ex: "mgm") mas
-    # realizado_map tem display names (ex: "Olympus")
-    def squad_visivel_expanded(sub_key):
-        if not squads_visiveis: return True
-        if norm(sub_key) in {norm(s) for s in squads_visiveis}: return True
-        for sv in squads_visiveis:
-            if norm(display_squad(sv)) == norm(sub_key): return True
-        return False
+    deals_fc = memo(("forecast",), lambda: pipedrive.deals(filter_id=filtro("forecast")))
+    ini_m, fim_m = limites_mes(hoje.year, hoje.month)
+    ganhos = memo(("ganhos", ini_m), lambda: pipedrive.ganhos_do_periodo(ini_m, fim_m))
+    validos = m1.separar_ganhos(ganhos, ini=ini_m, fim=fim_m, usuarios=usuarios)["validos"]
 
-    # realizado_map: sub_display -> won_date -> owner_name -> valor
-    realizado_map = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
-    for deal in deals_ganhos_reais:
-        wt = won_time_br(deal)[:10]
-        if not wt: continue
-        owner_nn = norm(get_owner_name(deal))
-        if not owner_nn:
-            oid = get_owner_id(deal)
-            owner_nn = uid_to_norm_fc.get(oid, "")
-        if not owner_nn: continue
-        squad_funil_fc = squad_por_funil(deal, pipes_fc)
-        if squad_funil_fc:
-            sub_key = squad_funil_fc
+    # agrupa: squad → dia → dono → deals do forecast; realizado: squad → dia → dono → valor (M2-B)
+    grupo = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    realizado = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    for d in deals_fc:
+        sq = _squad_do_deal(d, nome_squad, funis, usuarios)
+        if not sq or norm(sq) in FORA_FORECAST or not visivel_sq(sq): continue
+        dia = data_brasil(d.get("won_time")) if d.get("status") == "won" else data_local(d.get("expected_close_date"))
+        if not dia: continue
+        grupo[sq][dia][m1.nome_dono(d, usuarios)].append(d)
+    for d in validos:
+        dono = m1.nome_dono(d, usuarios)
+        if lc1.eh_licenciado(d, funis):
+            sq = LICENCIADOS
         else:
-            sub = nome_to_subarea.get(owner_nn, "")
-            if not sub: continue
-            sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
-        if not squad_visivel_expanded(sub_key): continue
-        realizado_map[sub_key][wt][get_owner_name(deal) or owner_nn] += float(deal.get("value") or 0)
+            p = por_nome.get(norm(dono))
+            if not p: continue
+            sq = m1.squad_da_venda(d, p, colab, funis)
+        if norm(sq) in FORA_FORECAST or not visivel_sq(sq): continue
+        realizado[sq][data_brasil(d.get("won_time"))][dono] += m2.bruto([d])
 
-    by_squad = defaultdict(lambda: defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0,"closers":defaultdict(lambda: {"p20":0.0,"p50":0.0,"p70":0.0,"realizado":0.0,"perda":0.0})}))
-    for deal in deals:
-        status = deal.get("status")
-        date_fc = str(deal.get("won_time") or deal.get("close_time") or "")[:10] if status == "won" else deal.get("expected_close_date")
-        if not date_fc: continue
-        owner = (deal.get("owner_name") or "").strip()
-        owner_nn = norm(owner)
-        subarea = nome_to_subarea.get(owner_nn, "")
-        if not subarea: continue
-        if squads_visiveis and norm(subarea) not in squads_visiveis: continue
-        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else display_squad(subarea)
-        value = float(deal.get("value") or 0)
-        probability = deal.get("probability")
-        d = by_squad[sub_display][date_fc]
-        c = d["closers"][owner]
-        if "deals" not in c: c["deals"] = []
-        c["deals"].append({"id": deal.get("id"), "titulo": deal.get("title",""), "valor": arred(value), "probabilidade": probability, "status": status})
-        if status == "lost":
-            d["perda"] += value; c["perda"] += value
-        elif status != "won":
-            if probability == 20: d["p20"] += value; c["p20"] += value
-            elif probability == 50: d["p50"] += value; c["p50"] += value
-            elif probability == 70: d["p70"] += value; c["p70"] += value
+    def bloco(deals, dia, real):
+        fx = f1.faixas(deals, dia, dia)
+        perda = f3.perda(deals, dia, dia)
+        conv = f4.conversao(real, fx["em_aberto"], perda)
+        return {"p20": arred(fx[20]), "p50": arred(fx[50]), "p70": arred(fx[70]),
+                "media": arred(f2.media_ponderada(fx)), "em_aberto": arred(fx["em_aberto"]),
+                "realizado": arred(real), "perda": arred(perda),
+                "total_previsto": arred(fx["em_aberto"] + real + perda),
+                "atingimento": arred(conv) if conv is not None else None,
+                "pct_atingimento": arred(conv) if conv is not None else None}
 
-    # Injeta realizado real em cada squad/dia/closer (respeitando squads_visiveis)
-    # squads_visiveis tem nomes raw (ex: "mgm"), realizado_map tem display names (ex: "Olympus")
-    # Monta set expandido incluindo aliases
-    for sub_key, dias in realizado_map.items():
-        if not squad_visivel_expanded(sub_key): continue
-        for dt, closers_r in dias.items():
-            for owner_name, valor in closers_r.items():
-                d = by_squad[sub_key][dt]
-                c = d["closers"][owner_name]
-                d["realizado"] += valor
-                c["realizado"] += valor
     result = {}
-    for squad, days in by_squad.items():
+    for sq in sorted(set(grupo) | set(realizado)):
         rows = []
-        for dt in sorted(days.keys()):
-            d = days[dt]
-            media = d["p20"]*0.20+d["p50"]*0.50+d["p70"]*0.70
-            em_aberto = d["p20"]+d["p50"]+d["p70"]
-            total_prev = em_aberto+d["realizado"]+d["perda"]
-            ating = arred(d["realizado"]/total_prev*100) if total_prev > 0 else None
-            closers_list = []
-            for cname, cv in d["closers"].items():
-                c_media = cv["p20"]*0.20+cv["p50"]*0.50+cv["p70"]*0.70
-                c_em_ab = cv["p20"]+cv["p50"]+cv["p70"]
-                c_total = c_em_ab+cv["realizado"]+cv["perda"]
-                c_ating = arred(cv["realizado"]/c_total*100) if c_total > 0 else None
-                closers_list.append({"nome":cname,"p20":arred(cv["p20"]),"p50":arred(cv["p50"]),"p70":arred(cv["p70"]),"media":arred(c_media),"em_aberto":arred(c_em_ab),"realizado":arred(cv["realizado"]),"perda":arred(cv["perda"]),"total_previsto":arred(c_total),"atingimento":c_ating,"deals":cv.get("deals",[])})
-            closers_list.sort(key=lambda x: -(x["realizado"]+x["media"]))
-            rows.append({"dia":dt,"p20":arred(d["p20"]),"p50":arred(d["p50"]),"p70":arred(d["p70"]),"media":arred(media),"em_aberto":arred(em_aberto),"realizado":arred(d["realizado"]),"perda":arred(d["perda"]),"total_previsto":arred(total_prev),"atingimento":ating,"closers":closers_list})
-        t = {k: sum(r[k] for r in rows) for k in ["p20","p50","p70","media","em_aberto","realizado","perda","total_previsto"]}
-        t_ating = arred(t["realizado"]/t["total_previsto"]*100) if t["total_previsto"] else None
-        result[squad] = {"rows": rows, "total": {**{k:arred(v) for k,v in t.items()}, "atingimento": t_ating}}
-    # Resumo do dia de hoje e ontem para Time Denise e Geral
-    hoje_str_fc   = date.today().strftime("%Y-%m-%d")
-    ontem_str_fc  = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        for dia in sorted(set(grupo[sq]) | set(realizado[sq])):
+            donos_dia = set(grupo[sq][dia]) | set(realizado[sq][dia])
+            todos = [d for lst in grupo[sq][dia].values() for d in lst]
+            linha = bloco(todos, dia, sum(realizado[sq][dia].values()))
+            closers = []
+            for dono in donos_dia:
+                c = bloco(grupo[sq][dia].get(dono, []), dia, realizado[sq][dia].get(dono, 0.0))
+                c["nome"] = dono
+                c["deals"] = [{"id": d.get("id"), "titulo": d.get("title", ""), "valor": arred(d.get("value")),
+                               "probabilidade": d.get("probability"), "status": d.get("status")}
+                              for d in grupo[sq][dia].get(dono, [])]
+                closers.append(c)
+            closers.sort(key=lambda x: -(x["realizado"] + x["media"]))
+            linha["dia"] = dia.isoformat(); linha["closers"] = closers
+            rows.append(linha)
+        t = {k: arred(sum(r[k] for r in rows)) for k in ["p20", "p50", "p70", "media", "em_aberto", "realizado", "perda", "total_previsto"]}
+        conv = f4.conversao(t["realizado"], t["em_aberto"], t["perda"])
+        t["atingimento"] = t["pct_atingimento"] = arred(conv) if conv is not None else None
+        result[sq] = {"rows": rows, "total": t}
 
-    # Próximo dia útil
-    feriados_fc = buscar_feriados()
-    prox_du_fc  = date.today() + timedelta(days=1)
-    while prox_du_fc.weekday() >= 5 or prox_du_fc in feriados_fc:
-        prox_du_fc += timedelta(days=1)
-    prox_du_str_fc = prox_du_fc.strftime("%Y-%m-%d")
-    DENISE_FC     = {"sniper", "elite", "olympus", "mgm"}
-    GERAL_FC      = {"sniper", "elite", "olympus", "mgm", "latam", "orion", "zenite"}
-
-    def resumo_dia(squad_names, dia_str):
-        r = {"prevista": 0.0, "perda": 0.0, "media": 0.0,
-             "p20": 0.0, "p50": 0.0, "p70": 0.0, "em_aberto": 0.0}
-        # Ganhos reais do dia pelo won_time (direto das rows do forecast)
-        realizado = 0.0
-        for sq_name, sq_data in result.items():
-            if norm(sq_name) not in squad_names: continue
-            for row in sq_data.get("rows", []):
-                if row["dia"] == dia_str:
-                    for k in r: r[k] = r.get(k, 0) + row.get(k, 0)
-                    realizado += row.get("realizado", 0)
-        r["realizado"] = arred(realizado)
+    # Resumos Time Denise e Geral — PROVISÓRIOS (FT1)
+    feriados = fontes.carregar_feriados()
+    prox = hoje + timedelta(days=1)
+    while prox.weekday() >= 5 or prox in feriados:
+        prox += timedelta(days=1)
+    def resumo(squads_alvo, dia=None):
+        r = defaultdict(float)
+        for sq, dados in result.items():
+            if norm(sq) not in squads_alvo: continue
+            for row in dados["rows"]:
+                if dia is None or row["dia"] == dia:
+                    for k in ["p20", "p50", "p70", "media", "em_aberto", "realizado", "perda"]:
+                        r[k] += row[k]
         return {k: arred(v) for k, v in r.items()}
-
-    def resumo_mes(squad_names):
-        r = {"p20": 0.0, "p50": 0.0, "p70": 0.0, "media": 0.0,
-             "em_aberto": 0.0, "realizado": 0.0, "perda": 0.0}
-        for sq_name, sq_data in result.items():
-            if norm(sq_name) not in squad_names: continue
-            for row in sq_data.get("rows", []):
-                for k in r: r[k] = r.get(k, 0) + row.get(k, 0)
-        return {k: arred(v) for k, v in r.items()}
-
-    resumo_fc = {
-        "time_denise":       resumo_dia(DENISE_FC, hoje_str_fc),
-        "geral":             resumo_dia(GERAL_FC,  hoje_str_fc),
-        "time_denise_ontem": resumo_dia(DENISE_FC, ontem_str_fc),
-        "geral_ontem":       resumo_dia(GERAL_FC,  ontem_str_fc),
-        "time_denise_prox":  resumo_dia(DENISE_FC, prox_du_str_fc),
-        "geral_prox":        resumo_dia(GERAL_FC,  prox_du_str_fc),
-        "time_denise_mes":   resumo_mes(DENISE_FC),
-        "geral_mes":         resumo_mes(GERAL_FC),
-        "hoje":  hoje_str_fc,
-        "ontem": ontem_str_fc,
-        "prox":  prox_du_str_fc,
-    }
-    return {"squads": result, "resumo": resumo_fc, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}
+    h, o, p = hoje.isoformat(), (hoje - timedelta(days=1)).isoformat(), prox.isoformat()
+    resumo_fc = {"provisorio": True,
+                 "time_denise": resumo(DENISE_FC, h), "geral": resumo(GERAL_FC, h),
+                 "time_denise_ontem": resumo(DENISE_FC, o), "geral_ontem": resumo(GERAL_FC, o),
+                 "time_denise_prox": resumo(DENISE_FC, p), "geral_prox": resumo(GERAL_FC, p),
+                 "time_denise_mes": resumo(DENISE_FC), "geral_mes": resumo(GERAL_FC),
+                 "hoje": h, "ontem": o, "prox": p}
+    return {"squads": result, "resumo": resumo_fc, "hoje": h, "atualizado_em": agora_str(),
+            "carimbo": carimbo("Eixo: data prevista (aberto e perda) e data de ganho (realizado) · Valor: bruto · "
+                               "Squad: Colab do mês atual; Licenciados pelo funil · Fonte do pipeline: filtro 1490240 · "
+                               "Sniper fora (100% SDR)")}
 
 @app.route("/api/forecast")
 def api_forecast():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
     try:
-        nome_sess = session.get("nome", "")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        if norm(nome_sess) in superusers:
-            head_filter = None
-        elif norm(nome_sess) == DENISE_NORM:
-            head_filter = "__denise__"
-        else:
-            colab_df = buscar_colaboradores()
-            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
-            if is_head:
-                head_filter = nome_sess
-            else:
-                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                lider_sub = None
-                if lider_col:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
-                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
-                            break
-                head_filter = f"__lider__:{nome_sess}" if lider_sub else "__none__"
-        fc = calcular_forecast(head_filter=head_filter)
-        # Remove squads 100% SDR do Forecast Diário
-        SQUADS_SEM_CLOSER = {"sniper"}
-        fc["squads"] = {k: v for k, v in fc.get("squads", {}).items()
-                        if norm(k) not in SQUADS_SEM_CLOSER}
-        return jsonify(limpar_nans(fc))
+        hoje = hoje_brasil()
+        hf = head_filter_da_sessao(session.get("nome", ""), fontes.carregar_colab(hoje.year, hoje.month))
+        return jsonify(limpar_nans(calcular_forecast(head_filter=hf)))
     except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-# ── HISTÓRICO / SNAPSHOT ──────────────────────────────────────
-def is_master(nome_sess):
-    masters = {norm(u.strip()) for u in MASTERS_RAW.split(",")}
-    return norm(nome_sess) in masters
-
-def github_get_file(path):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
-    resp = req.get(url, headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}, timeout=15)
-    if resp.status_code == 404: return None, None
-    resp.raise_for_status()
-    data = resp.json()
-    import base64
-    decoded = base64.b64decode(data["content"]).decode("utf-8")
-    return decoded, data["sha"]
-
-def github_put_file(path, content_str, sha=None, message="snapshot"):
-    import base64
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
-    body = {"message": message, "content": base64.b64encode(content_str.encode("utf-8")).decode("utf-8"), "branch": GITHUB_BRANCH}
-    if sha: body["sha"] = sha
-    resp = req.put(url, json=body, headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
-
-def calcular_snapshot():
-    import json
-    hoje_fc = date.today()
-    colab_df = buscar_colaboradores(mes=hoje_fc.month, ano=hoje_fc.year)
-    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    nome_to_subarea = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        nome_to_subarea[nn] = sub
-    deals = buscar_deals_forecast()
-    from collections import defaultdict
-    snapshot = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-    for deal in deals:
-        if deal.get("status") != "open": continue
-        date_fc = deal.get("expected_close_date")
-        if not date_fc: continue
-        if date_fc != hoje_fc.strftime("%Y-%m-%d"): continue
-        owner    = (deal.get("owner_name") or "").strip()
-        owner_nn = norm(owner)
-        subarea  = nome_to_subarea.get(owner_nn, "")
-        if not subarea: continue
-        sub_display = "Licenciados" if subarea.upper().startswith("LIC") else subarea
-        snapshot[sub_display][date_fc][owner].append({"id": deal.get("id"), "titulo": deal.get("title",""), "valor": arred(float(deal.get("value") or 0)), "probabilidade": deal.get("probability"), "expected_close_date_original": date_fc})
-    result = {}
-    for squad, days in snapshot.items():
-        result[squad] = {}
-        for dt, closers in days.items():
-            result[squad][dt] = dict(closers)
-    return result
-
-def enriquecer_snapshot(snapshot_data, mes=None, ano=None):
-    from collections import defaultdict
-
-    # Usa calcular_forecast para pegar os ganhos reais — mesma lógica do Forecast Diário
-    # Passa mes/ano do snapshot para pegar composição correta
-    fc_data = calcular_forecast(head_filter=None, mes=mes, ano=ano)
-    fc_squads = fc_data.get("squads", {})
-
-    # Monta ganhos_reais[squad][dia][closer] = valor a partir do forecast
-    ganhos_reais = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
-    for sq_name, sq_data in fc_squads.items():
-        for row in sq_data.get("rows", []):
-            dia = row["dia"]
-            for closer_data in row.get("closers", []):
-                if closer_data.get("realizado", 0) > 0:
-                    ganhos_reais[sq_name][dia][closer_data["nome"]] += closer_data["realizado"]
-
-    deal_map = {d["id"]: d for d in buscar_deals_forecast()}
-
-    result = {}
-    for squad, days in snapshot_data.items():
-        result[squad] = {}
-        for dt, closers in days.items():
-            day_totals = {"media_prevista": 0.0, "ganho": 0.0, "perdido": 0.0, "remanejado": 0.0, "closers": {}}
-            for closer, deals_list in closers.items():
-                c_totals = {"media_prevista": 0.0, "ganho": 0.0, "perdido": 0.0, "remanejado": 0.0, "deals": []}
-                for d in deals_list:
-                    prob  = d.get("probabilidade") or 0
-                    valor = d.get("valor", 0)
-                    media = valor * (prob / 100)
-                    c_totals["media_prevista"] += media
-                    day_totals["media_prevista"] += media
-                    atual = deal_map.get(d["id"])
-                    if not atual:
-                        status_atual = "ganho"
-                    else:
-                        status_atual = atual.get("status", "open")
-                        if status_atual == "won": status_atual = "ganho"
-                        elif status_atual == "lost": status_atual = "perdido"
-                        elif status_atual == "open":
-                            new_date = atual.get("expected_close_date", "")
-                            if new_date != d["expected_close_date_original"]:
-                                status_atual = "remanejado"
-                    c_totals["deals"].append({**d, "status_atual": status_atual})
-                # Ganho real do closer naquele dia — direto do forecast
-                c_totals["ganho"] = ganhos_reais.get(squad, {}).get(dt, {}).get(closer, 0.0)
-                day_totals["closers"][closer] = c_totals
-
-            # Total do dia = soma de todos os closers no forecast para aquele squad/dia
-            day_totals["ganho"] = sum(ganhos_reais.get(squad, {}).get(dt, {}).values())
-            total_prev = day_totals["media_prevista"]
-            day_totals["pct_atingimento"] = arred(day_totals["ganho"]/total_prev*100) if total_prev else None
-            result[squad][dt] = day_totals
-    return result
-
-@app.route("/api/snapshot", methods=["POST"])
-def api_snapshot():
-    if "nome" not in session or not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
-    try:
-        hoje_str = (datetime.now()-timedelta(hours=3)).strftime("%Y-%m-%d")
-        path = f"snapshots/{hoje_str}.json"
-        existing, sha = github_get_file(path)
-        if existing: return jsonify({"existe": True, "data": hoje_str})
-        import json
-        data = calcular_snapshot()
-        github_put_file(path, json.dumps(data, ensure_ascii=False, indent=2), sha=None, message=f"snapshot {hoje_str}")
-        return jsonify({"ok": True, "data": hoje_str})
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-@app.route("/api/snapshot/sobrepor", methods=["POST"])
-def api_snapshot_sobrepor():
-    if "nome" not in session or not is_master(session["nome"]): return jsonify({"erro": "Acesso negado"}), 403
-    try:
-        hoje_str = (datetime.now()-timedelta(hours=3)).strftime("%Y-%m-%d")
-        path = f"snapshots/{hoje_str}.json"
-        _, sha = github_get_file(path)
-        import json
-        data = calcular_snapshot()
-        github_put_file(path, json.dumps(data, ensure_ascii=False, indent=2), sha=sha, message=f"snapshot {hoje_str} (sobreposto)")
-        return jsonify({"ok": True, "data": hoje_str})
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-@app.route("/api/historico")
-def api_historico():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    nome_sess = session["nome"]
-    is_denise_h = norm(nome_sess) == "denise mussolin"
-    if not is_master(nome_sess) and not is_denise_h: return jsonify({"erro": "Acesso negado"}), 403
-    try:
-        import json
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/snapshots"
-        resp = req.get(url, headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}, timeout=15)
-        if resp.status_code == 404: return jsonify({"snapshots": []})
-        resp.raise_for_status()
-        files = [f["name"].replace(".json","") for f in resp.json() if f["name"].endswith(".json")]
-        files.sort(reverse=True)
-        result = {}
-        for fname in files[:30]:
-            content_str, _ = github_get_file(f"snapshots/{fname}.json")
-            if content_str:
-                snap = json.loads(content_str)
-                # Extrai mes/ano do nome do arquivo (ex: 2026-06-15)
-                try:
-                    parts = fname.split("-")
-                    snap_ano = int(parts[0]); snap_mes = int(parts[1])
-                except:
-                    snap_ano = None; snap_mes = None
-                result[fname] = enriquecer_snapshot(snap, mes=snap_mes, ano=snap_ano)
-        return jsonify(limpar_nans({"snapshots": result, "datas": files, "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")}))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-
-# ── FORECAST DE REUNIÕES ──────────────────────────────────────
-
-def calcular_forecast_reunioes(mes=None, ano=None, head_filter=None):
-    from collections import defaultdict
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-    hoje_str = hoje.strftime("%Y-%m-%d")
-
-    feriados   = buscar_feriados()
-    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
-    metas      = buscar_metas_todas(ano, mes)
-    users_pipe = buscar_users_pipe()
-    activities = buscar_activities_mes(mes, ano)
-    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
-
-    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    head_col  = next((c for c in colab_df.columns if "head" in norm(c)), None)
-    cargo_col = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
-
-    nome_to_subarea = {}
-    nome_to_head    = {}
-    nome_to_cargo   = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        hd  = str(row.get(head_col, "")).strip() if head_col else ""
-        cg  = str(row.get(cargo_col, "")).strip() if cargo_col else ""
-        nome_to_subarea[nn] = sub
-        nome_to_head[nn]    = norm(hd)
-        nome_to_cargo[nn]   = cg
-
-    team_leaders = {nn for nn, cg in nome_to_cargo.items() if "team leader" in norm(cg) or "sales team leader" in norm(cg)}
-    team_leaders |= {nn for nn, lid in nome_to_lider.items() if lid == nn and nn}
-    SQUADS_SEM_SDR_FR = {"latam", "orion"}
-
-    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
-    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
-
-    # Squads visíveis
-    DENISE_SQUADS_VISIVEIS = {"sniper", "elite", "mgm", "olympus", "ascensão", "ascensao"}
-
-    if head_filter is None:
-        squads_visiveis = None
-        pessoas_visiveis = None
-    elif head_filter == "__denise__":
-        squads_visiveis = DENISE_SQUADS_VISIVEIS
-        denise_nn = "denise mussolin"
-        # Heads diretos da Denise = quem tem head = Denise no COLAB
-        heads_da_denise = {nn for nn, hd in nome_to_head.items() if hd == denise_nn}
-        # Inclui também heads auto-referenciados dentro dos squads da Denise
-        # (ex: Marlon Silva que tem head = si mesmo mas gerencia Sniper)
-        heads_da_denise |= {nn for nn, sub in nome_to_subarea.items()
-                            if norm(sub) in DENISE_SQUADS_VISIVEIS
-                            and nome_to_head.get(nn) == nn}
-        # Pessoas visíveis = quem tem head = um desses heads OU head = Denise OU é a Denise
-        pessoas_visiveis = {nn for nn, hd in nome_to_head.items()
-                            if hd in heads_da_denise or hd == denise_nn or nn == denise_nn}
-    elif head_filter == "__none__":
-        squads_visiveis = set()
-    elif head_filter.startswith("__squad__:"):
-        squads_visiveis = {norm(head_filter.replace("__squad__:", ""))}
-    else:
-        head_nn = norm(head_filter)
-        squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
-                           if norm(nome_to_head.get(nn, "")) == head_nn and sub}
-
-    def visivel(sub):
-        return squads_visiveis is None or norm(sub) in squads_visiveis
-
-    # Identifica SDRs (meta_reu > 0) + team leaders de squads com SDR
-    sdrs_metas = [m for m in metas if m["meta_reu"] > 0 and m["meta_fin"] > 0]
-    sdr_uid_set = set()
-    sdr_info = {}  # uid -> {nome, subarea, is_lider}
-
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub or not visivel(sub): continue
-        uid = nome_norm_to_uid.get(nn)
-        if not uid: continue
-        sdr_uid_set.add(uid)
-        sdr_info[uid] = {"nome": m["nome"], "subarea": sub, "is_lider": False}
-
-    # Team leaders de squads com SDR também são SDR no forecast
-    lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-    for uid, uname in users_pipe.items():
-        nn = norm(uname)
-        if nn not in team_leaders: continue
-        own_sub = nome_to_subarea.get(nn, "")
-        if not own_sub or not visivel(own_sub): continue
-        if norm(own_sub) in SQUADS_SEM_SDR_FR: continue
-        if uid in sdr_uid_set: continue
-        sdr_uid_set.add(uid)
-        sdr_info[uid] = {"nome": uname, "subarea": own_sub, "is_lider": True}
-
-    # Mapas de atividades por owner e criador
-    acts_by_owner   = defaultdict(list)
-    acts_by_creator = defaultdict(list)
-    for act in activities:
-        oid = act.get("owner_id")
-        cid = act.get("created_by_user_id")
-        if oid: acts_by_owner[oid].append(act)
-        if cid: acts_by_creator[cid].append(act)
-
-    def get_acts_sdr(uid, sub):
-        return acts_by_owner.get(uid, [])
-
-    def act_realizada(act):
-        """Mesma regra do painel individual"""
-        if not (act.get("done") is True or act.get("status") == "done"): return False
-        deal_id   = act.get("deal_id")
-        act_owner = str(act.get("owner_id", ""))
-        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
-        if act_owner and deal_owner and act_owner == deal_owner: return False
-        if deal_id and deal_id not in deal_ids_validos: return False
-        return True
-
-    # Agrega por squad → dia → SDR
-    # Estrutura: by_squad[sub_display][dia][uid] = {prevista, ag_no_dia, ag_p_outros, realizada}
-    by_squad = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {
-        "prevista": 0, "ag_no_dia": 0, "ag_p_outros": 0, "realizada": 0
-    })))
-
-    for uid, info in sdr_info.items():
-        sub = info["subarea"]
-        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
-        acts = get_acts_sdr(uid, sub)
-
-        for act in acts:
-            due_date  = str(act.get("due_date", "") or "")[:10]
-            add_date  = str(act.get("add_time",  "") or "")[:10]
-            if not due_date: continue
-
-            d = by_squad[sub_display][due_date][uid]
-
-            # Prevista: qualquer activity com due_date = esse dia
-            d["prevista"] += 1
-
-            # Ag. no Dia: criada nesse mesmo dia E due_date = esse dia
-            if add_date == due_date:
-                d["ag_no_dia"] += 1
-
-            # Ag. p/ Outros: criada nesse dia MAS due_date é outro dia
-            # (conta no dia de criação, não no due_date)
-            # — tratado separado abaixo
-
-            # Realizada
-            if act_realizada(act):
-                d["realizada"] += 1
-
-    # "Ag. p/ Outros" = criada nesse dia MAS due_date é outro dia → conta no dia de criação
-    for uid, info in sdr_info.items():
-        sub = info["subarea"]
-        sub_display = "Licenciados" if sub.upper().startswith("LIC") else sub
-        acts = get_acts_sdr(uid, sub)
-
-        for act in acts:
-            due_date = str(act.get("due_date", "") or "")[:10]
-            add_date = str(act.get("add_time",  "") or "")[:10]
-            if not add_date or not due_date: continue
-            if add_date == due_date: continue  # já contou em ag_no_dia
-            # Agendou nesse dia (add_date) para outro dia (due_date)
-            # Registra no dia de criação (add_date)
-            by_squad[sub_display][add_date][uid]["ag_p_outros"] += 1
-
-    # Monta resultado final
-    import calendar as cal_mod
-    ultimo_dia = cal_mod.monthrange(ano, mes)[1]
-    all_days = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
-
-    # Meta de reuniões por squad (definida antes do loop para ter du_total disponível)
-    # du_total calculado antecipadamente para uso nas metas diárias
-    feriados_fr  = buscar_feriados()
-    du_total_fr  = du_mes_total(ano, mes, feriados_fr)
-    meta_reu_por_squad = defaultdict(float)
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub: continue
-        sub_display_m = "Licenciados" if sub.upper().startswith("LIC") else sub
-        meta_reu_por_squad[sub_display_m] += m["meta_reu"]
-
-    result = {}
-    for sub_display, days in by_squad.items():
-        meta_reu_squad = meta_reu_por_squad.get(sub_display, 0)
-        meta_diaria_squad = math.ceil(safe_div(meta_reu_squad, du_total_fr)) if du_total_fr else 0
-        rows = []
-        # Inclui todos os dias do mês que tenham dados
-        mes_str = f"{ano}-{mes:02d}"
-        dias_com_dados = sorted(d for d in days.keys() if d.startswith(mes_str))
-        for dia in dias_com_dados:
-            sdrs_dia = days[dia]
-            # Agrega totais do dia
-            tot_prev = sum(v["prevista"] for v in sdrs_dia.values())
-            tot_agnd = sum(v["ag_no_dia"] for v in sdrs_dia.values())
-            tot_agot = sum(v["ag_p_outros"] for v in sdrs_dia.values())
-            tot_real = sum(v["realizada"] for v in sdrs_dia.values())
-            is_past  = dia < hoje_str
-
-            tot_noshow = (tot_prev - tot_real) if is_past else None
-            tot_gap    = tot_prev - tot_real
-            tot_pct    = arred(safe_div(tot_real, tot_prev) * 100) if tot_prev > 0 else None
-
-            # SDRs individuais
-            sdrs_list = []
-            for uid, vals in sdrs_dia.items():
-                info = sdr_info.get(uid, {})
-                nome_sdr = info.get("nome", uid_to_nome_norm.get(uid, str(uid)))
-                is_lider = info.get("is_lider", False)
-                p = vals["prevista"]
-                r = vals["realizada"]
-                ns = (p - r) if is_past else None
-                g  = p - r
-                pct = arred(safe_div(r, p) * 100) if p > 0 else None
-                sdrs_list.append({
-                    "uid": uid,
-                    "nome": nome_sdr,
-                    "is_lider": is_lider,
-                    "prevista":    p,
-                    "ag_no_dia":   vals["ag_no_dia"],
-                    "ag_p_outros": vals["ag_p_outros"],
-                    "realizada":   r,
-                    "no_show":     ns,
-                    "gap":         g,
-                    "pct":         pct,
-                })
-            sdrs_list.sort(key=lambda x: -x["prevista"])
-
-            rows.append({
-                "dia":          dia,
-                "meta_diaria":  meta_diaria_squad,
-                "prevista":     tot_prev,
-                "ag_no_dia":    tot_agnd,
-                "ag_p_outros":  tot_agot,
-                "realizada":    tot_real,
-                "no_show":      tot_noshow,
-                "gap":          tot_gap,
-                "gap_meta":     max(0, meta_diaria_squad - tot_real),
-                "pct_meta":     arred(safe_div(tot_real, meta_diaria_squad) * 100) if meta_diaria_squad else None,
-                "pct":          tot_pct,
-                "sdrs":         sdrs_list,
-            })
-
-        # Total do squad
-        t_prev = sum(r["prevista"] for r in rows)
-        t_real = sum(r["realizada"] for r in rows)
-        t_pct  = arred(safe_div(t_real, t_prev) * 100) if t_prev > 0 else None
-        t_meta_diaria = meta_diaria_squad
-        t_gap_meta = max(0, t_meta_diaria * len(rows) - t_real) if t_meta_diaria else None
-        t_pct_meta = arred(safe_div(t_real, t_meta_diaria * len(rows)) * 100) if t_meta_diaria and rows else None
-        result[sub_display] = {
-            "rows": rows,
-            "total": {
-                "meta_diaria": t_meta_diaria,
-                "prevista":    t_prev,
-                "ag_no_dia":   sum(r["ag_no_dia"] for r in rows),
-                "ag_p_outros": sum(r["ag_p_outros"] for r in rows),
-                "realizada":   t_real,
-                "gap":         t_prev - t_real,
-                "gap_meta":    t_gap_meta,
-                "pct_meta":    t_pct_meta,
-                "pct":         t_pct,
-            }
-        }
-
-    # GAP 25: meta de 25 reuniões POR EQUIPE por dia
-    # Apenas Sniper, Elite e Olympus/MGM — SDRs individuais ficam com —
-    SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm", "ascensão", "ascensao"}
-    for sq_name, sq_data in result.items():
-        tem_gap25 = norm(sq_name) in SQUADS_GAP25
-        for row in sq_data["rows"]:
-            # SDRs individuais: sempre —
-            for sdr in row.get("sdrs", []):
-                sdr["gap_25"] = None
-                sdr["pct_25"] = None
-            # Linha do dia: GAP 25 = 25 - realizada do time
-            tot_row_real = row.get("realizada", 0)
-            if tem_gap25:
-                row["gap_25"] = max(0, 25 - tot_row_real)
-                row["pct_25"] = arred(safe_div(tot_row_real, 25) * 100)
-            else:
-                row["gap_25"] = None
-                row["pct_25"] = None
-        # Total: acumulado vs meta total (25 × número de dias com dados)
-        tot = sq_data.get("total", {})
-        if tem_gap25:
-            tot_real = tot.get("realizada", 0)
-            tot["gap_25"] = max(0, 25 - tot_real)
-            tot["pct_25"] = arred(safe_div(tot_real, 25) * 100)
-        else:
-            tot["gap_25"] = None
-            tot["pct_25"] = None
-
-    # Resumo hoje para Time Denise e Geral
-    hoje_str_fr = date.today().strftime("%Y-%m-%d")
-    DENISE_FR   = {"sniper", "elite", "olympus", "mgm"}
-    GERAL_FR    = {"sniper", "elite", "olympus", "mgm", "latam", "orion"}
-
-    def resumo_reunioes_hoje(squad_names, dia_str):
-        r = {"prevista": 0, "ag_no_dia": 0, "ag_p_outros": 0,
-             "realizada": 0, "no_show": None, "gap": 0,
-             "gap_25": None, "pct_25": None}
-        # GAP 25 consolidado Denise = 75 (3 equipes × 25)
-        DENISE_SQUADS_GAP25 = {"sniper", "elite", "olympus", "mgm", "ascensão", "ascensao"}
-        meta_25 = 0
-        for sq_name, sq_data in result.items():
-            if norm(sq_name) not in squad_names: continue
-            if norm(sq_name) in DENISE_SQUADS_GAP25:
-                meta_25 += 25
-            for row in sq_data.get("rows", []):
-                if row["dia"] == dia_str:
-                    for k in ["prevista","ag_no_dia","ag_p_outros","realizada","gap"]:
-                        r[k] = r.get(k,0) + row.get(k, 0)
-                    if row.get("no_show") is not None:
-                        r["no_show"] = (r["no_show"] or 0) + row["no_show"]
-        if meta_25 > 0:
-            r["gap_25"] = max(0, meta_25 - r["realizada"])
-            r["pct_25"] = arred(safe_div(r["realizada"], meta_25) * 100)
-        return {k: v for k, v in r.items()}
-
-    # Último dia útil antes de hoje
-    ultimo_du_fr = hoje - timedelta(days=1)
-    while ultimo_du_fr.weekday() >= 5 or ultimo_du_fr in feriados:
-        ultimo_du_fr -= timedelta(days=1)
-    ultimo_du_str = ultimo_du_fr.strftime("%Y-%m-%d")
-
-    resumo_fr = {
-        "time_denise":       resumo_reunioes_hoje(DENISE_FR, hoje_str_fr),
-        "geral":             resumo_reunioes_hoje(GERAL_FR,  hoje_str_fr),
-        "time_denise_ontem": resumo_reunioes_hoje(DENISE_FR, ultimo_du_str),
-        "geral_ontem":       resumo_reunioes_hoje(GERAL_FR,  ultimo_du_str),
-        "hoje":              hoje_str_fr,
-        "ontem":             ultimo_du_str,
-    }
-
-    return {
-        "squads": result,
-        "resumo": resumo_fr,
-        "mes": mes, "ano": ano,
-        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
-    }
-
-@app.route("/api/forecast-reunioes")
-def api_forecast_reunioes():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        mes = request.args.get("mes", type=int)
-        ano = request.args.get("ano", type=int)
-        nome_sess = session.get("nome", "")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        if norm(nome_sess) in superusers:
-            head_filter = None
-        elif norm(nome_sess) == DENISE_NORM:
-            head_filter = "__denise__"
-        else:
-            colab_df = buscar_colaboradores()
-            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
-            if is_head:
-                head_filter = nome_sess
-            else:
-                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                lider_sub = None
-                if lider_col:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
-                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
-                            break
-                head_filter = f"__lider__:{nome_sess}" if lider_sub else "__none__"
-        return jsonify(limpar_nans(calcular_forecast_reunioes(mes=mes, ano=ano, head_filter=head_filter)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-
-# ── OVERVIEW (JACARÉ) ─────────────────────────────────────────
-
-def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
-    from collections import defaultdict
-    import calendar as cal_mod
-
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-
-    abril_data = calcular_abril(mes=mes, ano=ano, head_filter=None)
-
-    feriados   = buscar_feriados()
-    du_total   = du_mes_total(ano, mes, feriados)
-    ultimo_dia = cal_mod.monthrange(ano, mes)[1]
-    todos_dias = [date(ano, mes, d).strftime("%Y-%m-%d") for d in range(1, ultimo_dia + 1)]
-
-    du_acum = {}
-    count = 0
-    for d in range(1, ultimo_dia + 1):
-        dt = date(ano, mes, d)
-        if dt.weekday() < 5 and dt not in feriados:
-            count += 1
-        du_acum[dt.strftime("%Y-%m-%d")] = count
-
-    # Meta por squad — usa nome de exibição como chave (ex: "Olympus")
-    meta_por_squad = {}
-    for sq in abril_data.get("squads", []):
-        tc = sq.get("closer_total")
-        if tc and tc.get("meta", 0) > 0:
-            # sq["nome"] já tem o display name aplicado pelo calcular_abril
-            meta_por_squad[sq["nome"]] = tc["meta"]
-
-    # Realizado por dia — usa display_squad para garantir mesma chave da meta
-    colab_df  = buscar_colaboradores(mes=mes, ano=ano)
-    sub_col   = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col  = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    nome_to_subarea = {}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        nome_to_subarea[nn] = sub
-
-    users_pipe_ov  = buscar_users_pipe()
-    uid_to_norm_ov = {uid: norm(name) for uid, name in users_pipe_ov.items()}
-
-    deals      = buscar_deals_mes(mes, ano)
-    pipes_ov   = buscar_pipelines()
-    ganhos_dia = defaultdict(lambda: defaultdict(float))
-    for deal in deals:
-        wt = won_time_br(deal)[:10]
-        if not wt: continue
-        # Denise: usa funil para determinar squad
-        squad_funil_ov = squad_por_funil(deal, pipes_ov)
-        if squad_funil_ov:
-            ganhos_dia[squad_funil_ov][wt] += float(deal.get("value") or 0)
-            continue
-        owner_nn = norm(get_owner_name(deal))
-        if not owner_nn:
-            oid = get_owner_id(deal)
-            owner_nn = uid_to_norm_ov.get(oid, "")
-        if not owner_nn: continue
-        sub = nome_to_subarea.get(owner_nn, "")
-        if not sub: continue
-        if sub.upper().startswith("LIC"):
-            sub_key = "Licenciados"
-        else:
-            sub_key = display_squad(sub)
-        ganhos_dia[sub_key][wt] += float(deal.get("value") or 0)
-
-    # Monta séries
-    result       = {}
-    meta_total   = 0.0
-    ganhos_total = defaultdict(float)
-    # Squads para o total (usando display names)
-    SQUADS_TOTAL_DISPLAY = {display_squad(s) for s in SQUADS_TOTAL_OVERVIEW} | SQUADS_TOTAL_OVERVIEW
-    all_squads = sorted(set(list(meta_por_squad.keys()) + list(ganhos_dia.keys())))
-
-    # Para Sniper (100% SDR): busca reuniões por dia
-    SQUAD_SDR_OV = {"sniper"}
-    reu_dia_sniper = defaultdict(int)  # dia -> reuniões validadas acumuláveis
-    meta_reu_sniper = 0.0
-    if any(norm(sq) in SQUAD_SDR_OV for sq in all_squads):
-        acts_ov   = buscar_activities_mes(mes, ano)
-        dv_ov, mo_ov = buscar_deals_rv_mes(mes, ano)
-        metas_ov  = buscar_metas_todas(ano, mes)
-        meta_reu_sniper = sum(m["meta_reu"] for m in metas_ov
-                              if norm(nome_to_subarea.get(m["nome_norm"], "")) == "sniper"
-                              and m["meta_reu"] > 0)
-        for act in acts_ov:
-            if not (act.get("done") is True or act.get("status") == "done"): continue
-            due = str(act.get("due_date", "") or "")[:10]
-            if not due: continue
-            act_owner = str(act.get("owner_id", ""))
-            deal_id   = act.get("deal_id")
-            deal_owner = str(mo_ov.get(deal_id, "")) if deal_id else ""
-            if act_owner and deal_owner and act_owner == deal_owner: continue
-            if deal_id and deal_id not in dv_ov: continue
-            # Verifica se é SDR do Sniper
-            owner_nn = uid_to_norm_ov.get(int(act_owner), "") if act_owner.isdigit() else ""
-            if not owner_nn: continue
-            if norm(nome_to_subarea.get(owner_nn, "")) != "sniper": continue
-            reu_dia_sniper[due] += 1
-
-    for squad in all_squads:
-        if norm(squad) in SQUADS_EXCLUIR_OVERVIEW or squad.lower() in SQUADS_EXCLUIR_OVERVIEW:
-            continue
-        meta = meta_por_squad.get(squad, 0.0)
-        if norm(squad) in SQUADS_TOTAL_OVERVIEW or squad in SQUADS_TOTAL_DISPLAY:
-            meta_total += meta
-            for dia in todos_dias:
-                ganhos_total[dia] += ganhos_dia[squad].get(dia, 0.0)
-        dias = []
-        real_acum = 0.0
-        reu_acum  = 0
-        is_sdr_squad = norm(squad) in SQUAD_SDR_OV
-        meta_reu_sq  = meta_reu_sniper if is_sdr_squad else 0
-        for dia in todos_dias:
-            real_acum += ganhos_dia[squad].get(dia, 0.0)
-            reu_acum  += reu_dia_sniper.get(dia, 0) if is_sdr_squad else 0
-            du_ate   = du_acum.get(dia, 0)
-            meta_mtd = arred(safe_div(meta, du_total) * du_ate) if du_total else 0
-            meta_reu_mtd = arred(safe_div(meta_reu_sq, du_total) * du_ate) if du_total and is_sdr_squad else None
-            dias.append({"dia": dia, "meta_mtd": meta_mtd, "real_mtd": arred(real_acum),
-                         "meta_reu_mtd": meta_reu_mtd, "reu_mtd": reu_acum if is_sdr_squad else None})
-        result[squad] = {"dias": dias, "meta_total": arred(meta),
-                         "is_sdr_squad": is_sdr_squad, "meta_reu_total": arred(meta_reu_sq) if is_sdr_squad else None}
-
-    # Consolidado Denise (Sniper + Elite + Olympus)
-    DENISE_OV = ["Sniper", "Elite", "Olympus"]
-    if is_denise:
-        denise_squads_data = {k: v for k, v in result.items() if k in DENISE_OV}
-        if denise_squads_data:
-            meta_denise = sum(v["meta_total"] for v in denise_squads_data.values())
-            denise_dias = []
-            for j, dia in enumerate(todos_dias):
-                real_d = sum(v["dias"][j]["real_mtd"] - (v["dias"][j-1]["real_mtd"] if j>0 else 0)
-                             for v in denise_squads_data.values())
-                pass
-            # Reconstrói série acumulada da Denise
-            denise_acum = 0.0
-            denise_ganhos_dia = defaultdict(float)
-            for sq_key in DENISE_OV:
-                sq_data = result.get(sq_key, {})
-                prev = 0.0
-                for row in sq_data.get("dias", []):
-                    delta = row["real_mtd"] - prev
-                    denise_ganhos_dia[row["dia"]] += delta
-                    prev = row["real_mtd"]
-            denise_dias_list = []
-            denise_acum = 0.0
-            count_d = 0
-            for dia in todos_dias:
-                denise_acum += denise_ganhos_dia.get(dia, 0.0)
-                count_d = du_acum.get(dia, 0)
-                meta_mtd_d = arred(safe_div(meta_denise, du_total) * count_d) if du_total else 0
-                denise_dias_list.append({"dia": dia, "meta_mtd": meta_mtd_d, "real_mtd": arred(denise_acum)})
-            result["__DENISE__"] = {"dias": denise_dias_list, "meta_total": arred(meta_denise)}
-
-    META_CAP_TOTAL = 3_000_000
-    total_acum = 0.0
-    total_dias = []
-    for dia in todos_dias:
-        total_acum += ganhos_total.get(dia, 0.0)
-        du_ate = du_acum.get(dia, 0)
-        total_dias.append({
-            "dia":      dia,
-            "meta_mtd": min(arred(safe_div(META_CAP_TOTAL, du_total) * du_ate), META_CAP_TOTAL) if du_total else 0,
-            "real_mtd": arred(total_acum),
-        })
-    result["__TOTAL__"] = {"dias": total_dias, "meta_total": META_CAP_TOTAL}
-
-    return {
-        "squads": result,
-        "is_denise": is_denise,
-        "is_master": head_filter is None,
-        "mes": mes, "ano": ano,
-        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
-    }
-@app.route("/api/overview")
-def api_overview():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        mes = request.args.get("mes", type=int)
-        ano = request.args.get("ano", type=int)
-        nome_sess = session.get("nome", "")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-
-        if norm(nome_sess) in superusers:
-            head_filter = None
-        elif norm(nome_sess) == DENISE_NORM:
-            head_filter = "__denise__"
-        else:
-            colab_df = buscar_colaboradores()
-            head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-            nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-            sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-            is_head  = head_col and any(norm(str(row.get(head_col,""))) == norm(nome_sess) for _, row in colab_df.iterrows())
-            if is_head:
-                head_filter = nome_sess
-            else:
-                lider_col = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-                lider_sub = None
-                if lider_col:
-                    for _, row in colab_df.iterrows():
-                        if norm(str(row.get(lider_col,""))) == norm(nome_sess):
-                            lider_sub = str(row.get(sub_col,"")).strip() if sub_col else None
-                            break
-                head_filter = f"__lider__:{nome_sess}" if lider_sub else "__none__"
-
-        # Verifica se é a Denise (head de Sniper+Elite+Olympus) para mostrar consolidado
-        DENISE_HEADS = {"denise mussolin"}
-        is_denise = norm(nome_sess) in DENISE_HEADS
-        return jsonify(limpar_nans(calcular_overview(mes=mes, ano=ano, head_filter=head_filter, is_denise=is_denise)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-
-# ── FLAGS SEMANAL ────────────────────────────────────────────
-
-def meta_diaria_para_data(dt, metas_cache, feriados):
-    """Retorna meta diária (closer=fin, sdr=reu+fin) para uma data específica."""
-    mes, ano = dt.month, dt.year
-    key = (ano, mes)
-    if key not in metas_cache:
-        metas_cache[key] = buscar_metas_todas(ano, mes)
-    du = du_mes_total(ano, mes, feriados)
-    return metas_cache[key], du
-
-@app.route("/api/ranking")
-def api_ranking():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        mes = request.args.get("mes", type=int)
-        ano = request.args.get("ano", type=int)
-        return jsonify(limpar_nans(calcular_ranking(mes=mes, ano=ano)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-
-# ── ORGANOGRAMA ───────────────────────────────────────────────
-
-def calcular_organograma(mes=None, ano=None):
-    from collections import defaultdict
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-    colab_df = buscar_colaboradores(mes=mes, ano=ano)
-
-    sub_col    = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col   = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    cargo_col  = next((c for c in colab_df.columns if norm(c) == "cargo"), None)
-    head_col   = next((c for c in colab_df.columns if "head" in norm(c) and "nivel" in norm(c)), None)
-    lider_col  = next((c for c in colab_df.columns if "lider" in norm(c) and "team" in norm(c)), None)
-    status_col = next((c for c in colab_df.columns if "status" in norm(c)), None)
-
-    FOTO_BASE = "https://raw.githubusercontent.com/negocios87-sketch/fotos_time_comercial/main"
-
-    # Coleta todos os membros ativos
-    membros = []
-    for _, row in colab_df.iterrows():
-        if status_col and norm(str(row.get(status_col, ""))) != "ativo":
-            continue
-        nome  = str(row.get(nome_col, "")).strip()
-        sub   = str(row.get(sub_col, "")).strip() if sub_col else ""
-        cargo = str(row.get(cargo_col, "")).strip() if cargo_col else ""
-        head  = str(row.get(head_col, "")).strip() if head_col else ""
-        lider = str(row.get(lider_col, "")).strip() if lider_col else ""
-        if not nome or not sub: continue
-        membros.append({
-            "nome": nome, "sub": sub, "cargo": cargo,
-            "head": head, "lider": lider,
-            "foto": f"{FOTO_BASE}/{nome}.jpg",
-        })
-
-    # Agrupa por squad
-    por_squad = defaultdict(list)
-    for m in membros:
-        por_squad[display_squad(m["sub"])].append(m)
-
-    result = []
-    ORDER = ["Sniper", "Elite", "Olympus", "LATAM", "Orion", "Zenite"]
-    all_squads = ORDER + [s for s in por_squad if s not in ORDER]
-
-    for squad in all_squads:
-        pessoas = por_squad.get(squad)
-        if not pessoas: continue
-
-        nomes = {norm(p["nome"]) for p in pessoas}
-
-        # HEAD = pessoa cujo head == nome próprio (ou cujo head está fora do squad)
-        heads = [p for p in pessoas if norm(p["head"]) == norm(p["nome"])]
-        # Se ninguém se auto-referencia como head, pega quem tem head fora do squad
-        if not heads:
-            heads = [p for p in pessoas if p["head"] and norm(p["head"]) not in nomes]
-
-        head_pessoa = heads[0] if heads else None
-        head_nn = norm(head_pessoa["nome"]) if head_pessoa else None
-
-        # LÍDERES = pessoas cujo lider == nome próprio (mas não é head)
-        lideres = [p for p in pessoas
-                   if norm(p["lider"]) == norm(p["nome"])
-                   and norm(p["nome"]) != head_nn]
-
-        lider_nns = {norm(l["nome"]) for l in lideres}
-
-        # Agrupa membros por líder
-        branches = []
-        for lider in lideres:
-            lider_nn = norm(lider["nome"])
-            membros_do_lider = [p for p in pessoas
-                                if norm(p["lider"]) == lider_nn
-                                and norm(p["nome"]) != lider_nn
-                                and norm(p["nome"]) != head_nn]
-            branches.append({"lider": lider, "membros": membros_do_lider})
-
-        # Sem líder definido (nem head, nem lider, nem membro de alguém)
-        alocados = {head_nn} | lider_nns | {norm(m["nome"]) for b in branches for m in b["membros"]}
-        sem_lider = [p for p in pessoas
-                     if norm(p["nome"]) not in alocados
-                     and norm(p["nome"]) != head_nn]
-
-        result.append({
-            "squad": squad,
-            "head": head_pessoa,
-            "lideres": branches,
-            "sem_lider": sem_lider,
-        })
-
-    return {
-        "squads": result,
-        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
-    }
-
-@app.route("/organograma")
-def organograma():
-    if "nome" not in session: return redirect("/login")
-    return render_template("organograma.html", nome=session["nome"])
-
-@app.route("/api/organograma")
-def api_organograma():
-    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
-    try:
-        mes = request.args.get("mes", type=int)
-        ano = request.args.get("ano", type=int)
-        return jsonify(limpar_nans(calcular_organograma(mes=mes, ano=ano)))
-    except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
-
-
-# ── RANKING ───────────────────────────────────────────────────
-
-def calcular_ranking(mes=None, ano=None):
-    hoje = date.today()
-    mes  = mes or hoje.month
-    ano  = ano or hoje.year
-
-    colab_df   = buscar_colaboradores(mes=mes, ano=ano)
-    metas      = buscar_metas_todas(ano, mes)
-    users_pipe = buscar_users_pipe()
-    qual_ids   = buscar_qual_ids()
-    deals      = buscar_deals_mes(mes, ano)
-    activities = buscar_activities_mes(mes, ano)
-    deal_ids_validos, mapa_deal_owner = buscar_deals_rv_mes(mes, ano)
-
-    feriados = buscar_feriados()
-    du_calc  = du_mes_total(ano, mes, feriados)
-    du_sheet = next((m["dias_uteis"] for m in metas if m["dias_uteis"] > 0), 0)
-    du_total = du_sheet if du_sheet > 0 else du_calc
-
-    sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-    nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-    nome_to_subarea  = {}
-    nome_norm_to_uid = {norm(name): uid for uid, name in users_pipe.items()}
-    uid_to_nome_norm = {uid: norm(name) for uid, name in users_pipe.items()}
-    for _, row in colab_df.iterrows():
-        nn  = norm(str(row.get(nome_col, "")))
-        sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-        nome_to_subarea[nn] = sub
-
-    if (ano > 2026) or (ano == 2026 and mes >= 5):
-        PESO_REU = 0.70; PESO_FIN = 0.30
-    else:
-        PESO_REU = 0.50; PESO_FIN = 0.50
-
-    closer_real = {}
-    for deal in deals:
-        owner_nn = norm(get_owner_name(deal))
-        if not owner_nn:
-            oid = get_owner_id(deal)
-            owner_nn = uid_to_nome_norm.get(oid, "")
-        if not owner_nn: continue
-        valor = float(deal.get("value") or 0)
-        if owner_nn not in closer_real:
-            closer_real[owner_nn] = {"valor": 0, "qtd": 0}
-        closer_real[owner_nn]["valor"] += valor
-        closer_real[owner_nn]["qtd"]   += 1
-
-    acts_by_owner = {}
-    for act in activities:
-        oid = str(act.get("owner_id", ""))
-        acts_by_owner.setdefault(oid, []).append(act)
-
-    def act_valida(act):
-        if not (act.get("done") is True or act.get("status") == "done"): return False
-        deal_id   = act.get("deal_id")
-        if not deal_id: return False  # exige deal vinculado
-        act_owner = str(act.get("owner_id", ""))
-        deal_owner = str(mapa_deal_owner.get(deal_id, "")) if deal_id else ""
-        if act_owner and deal_owner and act_owner == deal_owner: return False
-        if deal_id not in deal_ids_validos: return False
-        return True
-
-    closers_list = []
-    sdrs_list    = []
-    EXCLUIR_PESSOAS_CALC = {"priscila ribeiro"}
-    closers_metas = [m for m in metas if m["meta_reu"] == 0 and m["meta_fin"] > 0
-                      and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
-    sdrs_metas    = [m for m in metas if m["meta_reu"] > 0  and m["meta_fin"] > 0
-                     and m["nome_norm"] not in EXCLUIR_PESSOAS_CALC]
-
-    for m in closers_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub: continue
-        ri   = closer_real.get(nn, {"valor": 0, "qtd": 0})
-        meta = m["meta_fin"]
-        real = ri["valor"]
-        pct  = arred(safe_div(real, meta) * 100) if meta else 0
-        closers_list.append({
-            "nome": m["nome"], "time": display_squad(sub),
-            "meta": arred(meta), "realizado": arred(real),
-            "pct_atingido": pct,
-        })
-
-    for m in sdrs_metas:
-        nn  = m["nome_norm"]
-        sub = nome_to_subarea.get(nn, "")
-        if not sub: continue
-        meta_reu = m["meta_reu"]
-        meta_fin = m["meta_fin"]
-        uid      = nome_norm_to_uid.get(nn)
-        uid_str  = str(uid) if uid else ""
-        acts_sdr = acts_by_owner.get(uid_str, [])
-        validadas   = len([a for a in acts_sdr if act_valida(a)])
-        qual_id     = qual_ids.get(nn)
-        deals_sdr   = [d for d in deals if str(cf(d, CF_QUALIFICADOR)) == str(qual_id)] if qual_id else []
-        valor_ganho = sum(float(d.get("value") or 0) for d in deals_sdr)
-        pct_reu  = arred(safe_div(validadas, meta_reu) * 100) if meta_reu else 0
-        pct_fin  = arred(safe_div(valor_ganho, meta_fin) * 100) if meta_fin else 0
-        pct_final = arred(pct_reu * PESO_REU + pct_fin * PESO_FIN)
-        sdrs_list.append({
-            "nome": m["nome"], "time": display_squad(sub),
-            "meta_reu": arred(meta_reu), "realizado_reu": validadas,
-            "meta_fin": arred(meta_fin), "realizado_fin": arred(valor_ganho),
-            "pct_reu": pct_reu, "pct_fin": pct_fin, "pct_final": pct_final,
-        })
-
-    times = sorted(set([c["time"] for c in closers_list] + [s["time"] for s in sdrs_list]))
-    return {
-        "closers": closers_list, "sdrs": sdrs_list, "times": times,
-        "mes": mes, "ano": ano,
-        "atualizado_em": (datetime.now() - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
-    }
-
-
-
-# ── RESUMO POR PERÍODO ────────────────────────────────────────
+        return erro_json(e)
 
 @app.route("/api/forecast/periodo")
 def api_forecast_periodo():
     if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
     try:
-        data_ini = request.args.get("ini", "")
-        data_fim = request.args.get("fim", "")
-        if not data_ini or not data_fim:
+        if not request.args.get("ini") or not request.args.get("fim"):
             return jsonify({"erro": "Parâmetros ini e fim obrigatórios"}), 400
+        d_ini, d_fim = date.fromisoformat(request.args["ini"]), date.fromisoformat(request.args["fim"])
+        hoje = hoje_brasil()
+        colab = fontes.carregar_colab(hoje.year, hoje.month)
+        usuarios, funis = pipedrive.usuarios(), pipedrive.funis()
+        nome_sess = session.get("nome", "")
+        todos = is_superuser(nome_sess) or norm(nome_sess) == DENISE_NORM
+        hd = norm(nome_sess)
+        squads_vis = None if todos else {norm(p["squad"]) for p in colab if p["head_norm"] == hd and p["squad"]}
+        squad_visivel = lambda sq: squads_vis is None or norm(sq) in squads_vis
 
-        from collections import defaultdict
-        hoje_fc  = date.today()
-        colab_df = buscar_colaboradores(mes=hoje_fc.month, ano=hoje_fc.year)
-        sub_col  = next((c for c in colab_df.columns if norm(c) == "subarea"), None)
-        nome_col = next((c for c in colab_df.columns if norm(c) == "nome"), "Nome")
-        head_col = next((c for c in colab_df.columns if "head" in norm(c)), None)
-        nome_to_subarea = {}
-        nome_to_head    = {}
-        for _, row in colab_df.iterrows():
-            nn  = norm(str(row.get(nome_col, "")))
-            sub = str(row.get(sub_col, "")).strip() if sub_col else ""
-            hd  = str(row.get(head_col, "")).strip() if head_col else ""
-            nome_to_subarea[nn] = sub
-            nome_to_head[nn]    = hd
-
-        # Hierarquia
-        nome_sess  = session.get("nome", "")
-        superusers = {norm(u.strip()) for u in SUPERUSERS_RAW.split(",")}
-        is_denise_p = norm(nome_sess) == DENISE_NORM
-        if norm(nome_sess) in superusers or is_denise_p:
-            squads_visiveis = None
-        else:
-            head_nn = norm(nome_sess)
-            squads_visiveis = {norm(sub) for nn, sub in nome_to_subarea.items()
-                               if norm(nome_to_head.get(nn, "")) == head_nn and sub}
-
-        # Determina meses no range
-        from datetime import datetime as dt2
-        d_ini = date.fromisoformat(data_ini)
-        d_fim = date.fromisoformat(data_fim)
-        meses = set()
-        d = d_ini
-        while d <= d_fim:
-            meses.add((d.year, d.month))
-            d = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
-
-        # Busca deals ganhos pelo FILTER_DEALS no range
-        pipes_p   = buscar_pipelines()
-        users_p   = buscar_users_pipe()
-        uid_to_nn = {uid: norm(name) for uid, name in users_p.items()}
-
-        all_deals_ganhos = []
-        for (ano_m, mes_m) in sorted(meses):
-            all_deals_ganhos += buscar_deals_ganhos_todos(mes=mes_m, ano=ano_m)
-
-        # Usa calcular_forecast para pegar em aberto/perda/média (mesma fonte das tabelas)
-        fc_data = calcular_forecast(head_filter=None if (norm(nome_sess) in superusers or is_denise_p) else nome_sess)
-        fc_squads = fc_data.get("squads", {})
-
-        DENISE_SQ = {"sniper", "elite", "olympus", "mgm"}
-        EXCLUIR   = {"zenite", "licenciados"}
-
-        def squad_visivel(sub_key):
-            if squads_visiveis is None: return True
-            if norm(sub_key) in {norm(s) for s in squads_visiveis}: return True
-            for sv in squads_visiveis:
-                if norm(display_squad(sv)) == norm(sub_key): return True
-            return False
-
-        # Realizado por squad no range (FILTER_DEALS)
+        # Realizado do período (M2-B): só o período pedido
+        ganhos = pipedrive.ganhos_do_periodo(d_ini, d_fim)
+        validos = m1.separar_ganhos(ganhos, ini=d_ini, fim=d_fim, usuarios=usuarios)["validos"]
+        por_nome = {p["nome_norm"]: p for p in colab}
         realizado = defaultdict(float)
-        for deal in all_deals_ganhos:
-            wt = won_time_br(deal)[:10]
-            if not wt or wt < data_ini or wt > data_fim: continue
-            sq_funil = squad_por_funil(deal, pipes_p)
-            if sq_funil:
-                sub_key = sq_funil
+        for d in validos:
+            if lc1.eh_licenciado(d, funis):
+                sq = LICENCIADOS
             else:
-                owner_nn = norm(get_owner_name(deal))
-                if not owner_nn:
-                    oid = get_owner_id(deal)
-                    owner_nn = uid_to_nn.get(oid, "")
-                sub = nome_to_subarea.get(owner_nn, "")
-                if not sub: continue
-                sub_key = "Licenciados" if sub.upper().startswith("LIC") else display_squad(sub)
-            if not squad_visivel(sub_key): continue
-            realizado[sub_key] += float(deal.get("value") or 0)
+                p = por_nome.get(norm(m1.nome_dono(d, usuarios)))
+                if not p: continue
+                sq = m1.squad_da_venda(d, p, colab, funis)
+            if squad_visivel(sq): realizado[sq] += m2.bruto([d])
 
-        # Em aberto, perda, média — soma das rows do calcular_forecast no range
-        em_aberto = defaultdict(float)
-        perda      = defaultdict(float)
-        media      = defaultdict(float)
-        p20 = defaultdict(float); p50 = defaultdict(float); p70 = defaultdict(float)
+        fc = calcular_forecast(head_filter=None if todos else nome_sess)["squads"]
+        acc = {k: defaultdict(float) for k in ["em_aberto", "perda", "media", "p20", "p50", "p70"]}
+        for sq, dados in fc.items():
+            if not squad_visivel(sq): continue
+            for row in dados["rows"]:
+                if request.args["ini"] <= row["dia"] <= request.args["fim"]:
+                    for k in acc: acc[k][sq] += row.get(k, 0)
 
-        for sq_name, sq_data in fc_squads.items():
-            if not squad_visivel(sq_name): continue
-            for row in sq_data.get("rows", []):
-                if row["dia"] < data_ini or row["dia"] > data_fim: continue
-                em_aberto[sq_name] += row.get("em_aberto", 0)
-                perda[sq_name]     += row.get("perda", 0)
-                media[sq_name]     += row.get("media", 0)
-                p20[sq_name]       += row.get("p20", 0)
-                p50[sq_name]       += row.get("p50", 0)
-                p70[sq_name]       += row.get("p70", 0)
-
-        # Monta squads
-        all_squads = set(realizado) | set(em_aberto) | set(perda)
-        ORDER = ["Sniper", "Elite", "Olympus", "LATAM", "Orion"]
-
-        def mk_row(sq):
-            r = arred(realizado.get(sq, 0))
-            e = arred(em_aberto.get(sq, 0))
-            m = arred(media.get(sq, 0))
-            pe = arred(perda.get(sq, 0))
-            return {"squad": sq, "realizado": r, "em_aberto": e,
-                    "media": m, "perda": pe,
-                    "p20": arred(p20.get(sq,0)), "p50": arred(p50.get(sq,0)), "p70": arred(p70.get(sq,0)),
+        excluir = {"zenite", "licenciados"}
+        ordem = ["Sniper", "Elite", "Olympus", "LATAM", "Orion"]
+        todos_sq = set(realizado) | set(acc["em_aberto"]) | set(acc["perda"])
+        def mk(sq, nome=None, lista=None):
+            lst = lista or [sq]
+            r = sum(realizado.get(s, 0) for s in lst); e = sum(acc["em_aberto"].get(s, 0) for s in lst)
+            return {"squad": nome or sq, "realizado": arred(r), "em_aberto": arred(e),
+                    "media": arred(sum(acc["media"].get(s, 0) for s in lst)),
+                    "perda": arred(sum(acc["perda"].get(s, 0) for s in lst)),
+                    "p20": arred(sum(acc["p20"].get(s, 0) for s in lst)),
+                    "p50": arred(sum(acc["p50"].get(s, 0) for s in lst)),
+                    "p70": arred(sum(acc["p70"].get(s, 0) for s in lst)),
                     "total_prev": arred(r + e)}
-
-        squads_out = [mk_row(sq) for sq in ORDER if sq in all_squads and norm(sq) not in EXCLUIR]
-        # Extra squads fora da ordem
-        for sq in sorted(all_squads):
-            if sq not in ORDER and norm(sq) not in EXCLUIR:
-                squads_out.append(mk_row(sq))
-
-        # Denise consolidado (Sniper + Elite + Olympus)
-        denise_sqs = [sq for sq in all_squads if norm(sq) in DENISE_SQ]
-        denise_row = {
-            "squad": "Time Denise",
-            "realizado":  arred(sum(realizado.get(sq,0) for sq in denise_sqs)),
-            "em_aberto":  arred(sum(em_aberto.get(sq,0) for sq in denise_sqs)),
-            "media":      arred(sum(media.get(sq,0) for sq in denise_sqs)),
-            "perda":      arred(sum(perda.get(sq,0) for sq in denise_sqs)),
-            "p20": arred(sum(p20.get(sq,0) for sq in denise_sqs)),
-            "p50": arred(sum(p50.get(sq,0) for sq in denise_sqs)),
-            "p70": arred(sum(p70.get(sq,0) for sq in denise_sqs)),
-            "total_prev": arred(sum((realizado.get(sq,0)+em_aberto.get(sq,0)) for sq in denise_sqs)),
-        }
-
-        # Geral
-        geral_row = {
-            "squad": "Geral",
-            "realizado":  arred(sum(realizado.values())),
-            "em_aberto":  arred(sum(em_aberto.values())),
-            "media":      arred(sum(media.values())),
-            "perda":      arred(sum(perda.values())),
-            "p20": arred(sum(p20.values())), "p50": arred(sum(p50.values())), "p70": arred(sum(p70.values())),
-            "total_prev": arred(sum(realizado.values()) + sum(em_aberto.values())),
-        }
-
+        squads_out = [mk(sq) for sq in ordem if sq in todos_sq and norm(sq) not in excluir]
+        squads_out += [mk(sq) for sq in sorted(todos_sq) if sq not in ordem and norm(sq) not in excluir]
         return jsonify(limpar_nans({
             "squads": squads_out,
-            "denise": denise_row,
-            "geral":  geral_row,
-            "ini": data_ini, "fim": data_fim,
-            "atualizado_em": (datetime.now()-timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
+            "denise": mk(None, "Time Denise · Provisório", [s for s in todos_sq if norm(s) in DENISE_FC]),
+            "geral": mk(None, "Geral · Provisório", list(todos_sq)),
+            "ini": request.args["ini"], "fim": request.args["fim"], "atualizado_em": agora_str(),
         }))
     except Exception as e:
-        import traceback
-        return jsonify({"erro": str(e), "trace": traceback.format_exc()}), 500
+        return erro_json(e)
+
+# ── OVERVIEW (JACARÉ = MTD em gráfico) ────────────────────────
+def calcular_overview(mes=None, ano=None, head_filter=None, is_denise=False):
+    hoje = hoje_brasil()
+    mes, ano = mes or hoje.month, ano or hoje.year
+    abril_data = calcular_abril(mes=mes, ano=ano, head_filter=None)
+    D = carregar_mes(ano, mes)
+    du_total = D["du"]["total"]
+    uteis = fontes.dias_uteis_calendario(ano, mes, D["feriados"])
+    ini, fim = D["ini"], D["fim"]
+    todos_dias = [ini + timedelta(days=i) for i in range((fim - ini).days + 1)]
+    du_ate = {d: sum(1 for u in uteis if u <= d) for d in todos_dias}
+
+    # Meta por squad = total de closers da aba do mês (M3 / AS3 / J2)
+    meta_sq = {sq["nome"]: (sq["closer_total"]["_meta"] if sq.get("closer_total") else 0.0)
+               for sq in abril_data["squads"]}
+
+    ganhos_dia = defaultdict(lambda: defaultdict(float))
+    for nn, info in D["por_closer"].items():
+        for d in info["deals"]:
+            ganhos_dia[info["squad_por_deal"][d.get("id")]][data_brasil(d.get("won_time"))] += m2.bruto([d])
+
+    # Sniper: reuniões validadas por dia (M6) e meta de reuniões
+    sniper_nn = {p["nome_norm"] for p in D["colab"] if a1.squad_so_sdr(p["squad"])}
+    uid_sniper = {D["nn_para_uid"][nn] for nn in sniper_nn if nn in D["nn_para_uid"]}
+    reu_dia = defaultdict(int)
+    for uid, lst in D["reunioes"].items():
+        if uid in uid_sniper:
+            for a in lst: reu_dia[atividade_dia(a)] += 1
+    meta_reu_sniper = sum(m["meta_reunioes"] for m in D["metas"] if m["nome_norm"] in sniper_nn and m["papel"] == "sdr")
+
+    def serie(meta, por_dia, meta_reu=None, reu=None):
+        dias, acum, acum_r = [], 0.0, 0
+        for dia in todos_dias:
+            acum += por_dia.get(dia, 0.0)
+            if reu is not None: acum_r += reu.get(dia, 0)
+            dias.append({"dia": dia.isoformat(),
+                         "meta_mtd": arred(t1.mtd(0, meta, du_total, du_ate[dia])["meta_mtd"]),
+                         "real_mtd": arred(acum),
+                         "meta_reu_mtd": arred(t1.mtd(0, meta_reu, du_total, du_ate[dia])["meta_mtd"]) if reu is not None else None,
+                         "reu_mtd": acum_r if reu is not None else None})
+        return dias
+
+    result = {}
+    for sq in sorted(set(meta_sq) | set(ganhos_dia)):
+        if eh_lic(sq) or norm(sq) == "licenciados": continue
+        sdr = a1.squad_so_sdr(sq)
+        result[sq] = {"dias": serie(meta_sq.get(sq, 0.0), ganhos_dia[sq],
+                                    meta_reu_sniper if sdr else None, reu_dia if sdr else None),
+                      "meta_total": arred(meta_sq.get(sq, 0.0)), "is_sdr_squad": sdr,
+                      "meta_reu_total": arred(meta_reu_sniper) if sdr else None}
+
+    if is_denise:   # consolidado PROVISÓRIO (FT1)
+        den = [sq for sq in result if sq in ("Sniper", "Elite", "Olympus")]
+        if den:
+            g = defaultdict(float)
+            for sq in den:
+                for dia, v in ganhos_dia[sq].items(): g[dia] += v
+            meta_d = sum(meta_sq.get(sq, 0) for sq in den)
+            result["__DENISE__"] = {"dias": serie(meta_d, g), "meta_total": arred(meta_d), "provisorio": True}
+
+    # Total: Σ metas de Closers/IS (J2/AS3) e Σ ganhos, sem Zenite, Int. Comercial e Licenciados
+    tot_sq = [sq for sq in result if not sq.startswith("__") and norm(sq) not in EXCLUIR_GERAL]
+    g_tot = defaultdict(float)
+    for sq in tot_sq:
+        for dia, v in ganhos_dia[sq].items(): g_tot[dia] += v
+    meta_tot = sum(meta_sq.get(sq, 0) for sq in tot_sq)
+    result["__TOTAL__"] = {"dias": serie(meta_tot, g_tot), "meta_total": arred(meta_tot)}
+
+    return {"squads": result, "is_denise": is_denise, "is_master": head_filter is None,
+            "mes": mes, "ano": ano, "atualizado_em": agora_str(),
+            "carimbo": carimbo("Eixo: data de ganho; Sniper por data da reunião · Valor: bruto · "
+                               "Meta: J2 (Closers/IS; Ascensão pela gestora) · Total exc. Zenite, Int. Comercial e Licenciados")}
+
+@app.route("/api/overview")
+def api_overview():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        mes, ano = mes_ano_da_req()
+        nome_sess = session.get("nome", "")
+        hf = head_filter_da_sessao(nome_sess, fontes.carregar_colab(ano, mes))
+        return jsonify(limpar_nans(calcular_overview(mes=mes, ano=ano, head_filter=hf,
+                                                     is_denise=norm(nome_sess) == DENISE_NORM)))
+    except Exception as e:
+        return erro_json(e)
+
+# ── RANKING ───────────────────────────────────────────────────
+def calcular_ranking(mes=None, ano=None):
+    hoje = hoje_brasil()
+    mes, ano = mes or hoje.month, ano or hoje.year
+    D = carregar_mes(ano, mes)
+    ref = date(ano, mes, 1)
+    pessoa = {p["nome_norm"]: p for p in D["colab"]}
+    closers, sdrs = [], []
+    for m in D["metas"]:
+        p = pessoa.get(m["nome_norm"])
+        if not p or not p["squad"]: continue
+        nn = m["nome_norm"]
+        if m["papel"] == "closer":
+            deals = D["por_closer"].get(nn, {}).get("deals", [])
+            real = m2.bruto(deals)                                                  # M2-B
+            closers.append({"nome": m["nome"], "time": p["squad"], "meta": arred(m["meta_financeira"]),
+                            "realizado": arred(real),
+                            "pct_atingido": arred(m3.atingimento(real, m["meta_financeira"]))})   # M3-B
+        elif m["papel"] == "sdr":
+            uid = D["nn_para_uid"].get(nn)
+            validadas = len(D["reunioes"].get(uid, [])) if uid is not None else 0
+            bruto = m5.bruto(D["por_sdr"].get(nn, []))                              # M5-B
+            pct_reu = m6.pct_reunioes(validadas, m["meta_reunioes"])
+            pct_fin = m5.pct_financeiro(bruto, m["meta_financeira"])
+            sdrs.append({"nome": m["nome"], "time": p["squad"], "meta_reu": arred(m["meta_reunioes"]),
+                         "realizado_reu": validadas, "meta_fin": arred(m["meta_financeira"]),
+                         "realizado_fin": arred(bruto), "pct_reu": arred(pct_reu), "pct_fin": arred(pct_fin),
+                         "pct_final": arred(m7.pct_final(pct_reu, pct_fin, ref))})             # M7-B
+    times = sorted({c["time"] for c in closers} | {s["time"] for s in sdrs})
+    return {"closers": closers, "sdrs": sdrs, "times": times, "mes": mes, "ano": ano,
+            "atualizado_em": agora_str(),
+            "carimbo": carimbo("Eixo: data de ganho e data da reunião · Valor: bruto (M3-B, M5-B, M7-B) · Recorte: com meta")}
+
+@app.route("/api/ranking")
+def api_ranking():
+    if "nome" not in session: return jsonify({"erro": "Não autenticado"}), 401
+    try:
+        mes, ano = mes_ano_da_req()
+        return jsonify(limpar_nans(calcular_ranking(mes=mes, ano=ano)))
+    except Exception as e:
+        return erro_json(e)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
