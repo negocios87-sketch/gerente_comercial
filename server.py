@@ -87,13 +87,13 @@ MASTERS_RAW    = os.environ.get("MASTERS", "rodrigo leira,matheus paz,farias sou
 DENISE_NORM    = "denise mussolin"
 
 # ── RECORTES DO PAINEL (escolha do painel, não regra; vão no carimbo) ─────────
-SQUADS_SEM_SDR   = {"latam", "orion"}                       # não mostram líder na tabela de SDR
+SQUADS_SEM_SDR   = {"latam", "vanguard"}                      # não mostram líder na tabela de SDR
 EXCLUIR_CARDS    = {"inteligencia comercial", "int. comercial"}
 EXCLUIR_GERAL    = {"zenite", "licenciados", "inteligencia comercial", "int. comercial"}  # Total Geral (decidido 21/10/2026)
 # Consolidados da Denise e "Geral": PROVISÓRIOS até a FT1 (frentes) sair de Decisão.
 DENISE_SQUADS    = {"sniper", "elite", "mgm", "olympus", "ascensao"}
 DENISE_FC        = {"sniper", "elite", "olympus", "mgm"}
-GERAL_FC         = {"sniper", "elite", "olympus", "mgm", "latam", "orion", "zenite"}
+GERAL_FC         = {"sniper", "elite", "olympus", "mgm", "latam", "vanguard", "zenite"}
 LICENCIADOS      = "Licenciados"
 CACHE_PIPEDRIVE  = 120   # segundos: a aba do mês e o Overview usam a mesma busca
 
@@ -720,7 +720,7 @@ def api_forecast_periodo():
                     for k in acc: acc[k][sq] += row.get(k, 0)
 
         excluir = {"zenite", "licenciados"}
-        ordem = ["Sniper", "Elite", "Olympus", "LATAM", "Orion"]
+        ordem = ["Sniper", "Elite", "Olympus", "LATAM", "Vanguard"]
         todos_sq = set(realizado) | set(acc["em_aberto"]) | set(acc["perda"])
         def mk(sq, nome=None, lista=None):
             lst = lista or [sq]
