@@ -211,7 +211,8 @@ def _carregar_mes(ano, mes):
     lider_ids   = {nn_para_uid[p["nome_norm"]] for p in colab
                    if h1.nivel(p, colab) != "membro" and p["nome_norm"] in nn_para_uid}
     reunioes    = m6.reunioes_validadas(atividades, ini, fim, deals_validados=validados, dono_do_deal=donos,
-                                        sdr_ids=sdr_ids, lideranca_ids=lider_ids)
+                                        sdr_ids=sdr_ids, lideranca_ids=lider_ids,
+                                        lideranca_que_agenda_ids=m6.lideranca_que_agenda(colab, nn_para_uid))
 
     # Referidos (RF1): o filtro 1562285 ainda é a definição (pendência na CRN)
     refs_por_uid = rf1.referidos_do_mes(pipedrive.deals_do_filtro(filtro("referidos")), ano, mes)
@@ -318,8 +319,9 @@ def calcular_abril(mes=None, ano=None, head_filter=None):
     for m in metas:
         if m["papel"] != "closer": continue
         p = pessoa.get(m["nome_norm"])
-        if not p or not p["squad"] or not visivel(p["squad"]): continue
-        nn, sq = m["nome_norm"], p["squad"]
+        sq = m1.squad_da_pessoa(p) if p else ""                      # M1: gerente na equipe fixa
+        if not p or not sq or not visivel(sq): continue
+        nn = m["nome_norm"]
         usados.add((sq, nn))
         get_squad(sq)["closers_ind"].append(
             linha_closer(m["nome"], m["meta_financeira"], deals_sq.get((sq, nn), []), refs=D["referidos"].get(nn, 0)))
@@ -843,7 +845,7 @@ def calcular_ranking(mes=None, ano=None):
         if m["papel"] == "closer":
             deals = D["por_closer"].get(nn, {}).get("deals", [])
             real = m2.bruto(deals)                                                  # M2-B
-            closers.append({"nome": m["nome"], "time": p["squad"], "meta": arred(m["meta_financeira"]),
+            closers.append({"nome": m["nome"], "time": m1.squad_da_pessoa(p), "meta": arred(m["meta_financeira"]),
                             "realizado": arred(real),
                             "pct_atingido": arred(m3.atingimento(real, m["meta_financeira"]))})   # M3-B
         elif m["papel"] == "sdr":
