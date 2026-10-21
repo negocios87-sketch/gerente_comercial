@@ -58,9 +58,28 @@ DENISE_SQUADS    = {"sniper", "elite", "mgm", "olympus", "ascensao"}
 DENISE_FC        = {"sniper", "elite", "olympus", "mgm"}
 GERAL_FC         = {"sniper", "elite", "olympus", "mgm", "latam", "orion", "zenite"}
 LICENCIADOS      = "Licenciados"
-SQUAD_ASCENSAO   = norm(config()["AS3_meta_ascensao"]["squad"])
-FORA_FORECAST    = {norm(s) for s in config()["squads"]["fora_do_forecast"]}
 CACHE_PIPEDRIVE  = 120   # segundos: a aba do mês e o Overview usam a mesma busca
+
+# Confere se a CRN instalada tem o que este painel usa. Se a Vercel reaproveitou uma CRN antiga
+# do cache, o painel avisa em vez de cair com FUNCTION_INVOCATION_FAILED.
+CRN_DESATUALIZADA = None
+try:
+    import inspect
+    SQUAD_ASCENSAO = norm(config()["AS3_meta_ascensao"]["squad"])
+    FORA_FORECAST  = {norm(s) for s in config()["squads"]["fora_do_forecast"]}
+    if "tipos" not in inspect.signature(pipedrive.atividades_do_periodo).parameters:
+        raise KeyError("atividades_do_periodo(tipos=...)")
+except KeyError as falta:
+    SQUAD_ASCENSAO, FORA_FORECAST = "", set()
+    CRN_DESATUALIZADA = (f"CRN instalada desatualizada (versão {crn.versao()}, falta {falta}). "
+                         "Na Vercel: Deployments → ⋯ → Redeploy, desmarcando 'Use existing Build Cache'.")
+
+@app.before_request
+def _checar_crn():
+    if CRN_DESATUALIZADA:
+        if request.path.startswith("/api/"):
+            return jsonify({"erro": CRN_DESATUALIZADA}), 500
+        return f"<p style='font-family:sans-serif;padding:24px'>{CRN_DESATUALIZADA}</p>", 500
 
 # ── HELPERS ───────────────────────────────────────────────────
 def arred(v):
