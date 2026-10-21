@@ -29,7 +29,44 @@ from datetime import date, timedelta
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, session
 
+
+# ── CRN: baixada do GitHub quando o painel liga ───────────────
+# A Vercel não repassa o token para o instalador do build, então a CRN não entra pelo
+# requirements.txt. O painel baixa a versão atual da main (com o token, que em tempo de
+# execução funciona) e carrega. Cada vez que o painel liga, pega as regras mais recentes.
+# No computador, se a crn já estiver instalada (instalar.bat), usa a instalada.
+def _carregar_crn():
+    import importlib.util
+    import shutil
+    import sys
+    import tarfile
+    import tempfile
+    if importlib.util.find_spec("crn") is not None:
+        return None
+    import requests
+    token = (os.environ.get("CRN_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
+    if not token:
+        raise RuntimeError("CRN_GITHUB_TOKEN não está nas Environment Variables da Vercel.")
+    r = requests.get("https://api.github.com/repos/negocios87-sketch/CRN/tarball/main",
+                     headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                     timeout=30)
+    if r.status_code != 200:
+        raise RuntimeError(f"Não consegui baixar a CRN do GitHub (HTTP {r.status_code}). Confira o CRN_GITHUB_TOKEN.")
+    base = tempfile.mkdtemp(prefix="crn_")
+    with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:gz") as tar:
+        tar.extractall(base, filter="data")
+    raiz = os.path.join(base, os.listdir(base)[0])          # negocios87-sketch-CRN-<commit>
+    destino = os.path.join(base, "pacote", "crn")
+    shutil.copytree(os.path.join(raiz, "lib"), destino)     # mesmo mapa do pyproject da CRN
+    shutil.copytree(os.path.join(raiz, "config"), os.path.join(destino, "config"))
+    sys.path.insert(0, os.path.join(base, "pacote"))
+    return os.path.basename(raiz).rsplit("-", 1)[-1][:7]   # commit que entrou
+
+_COMMIT_CRN = _carregar_crn()
+
 import crn
+if _COMMIT_CRN:
+    crn.versao = lambda: _COMMIT_CRN                        # carimbo mostra o commit carregado
 from crn.base import fontes, pipedrive
 from crn.base.config import campo, config, filtro
 from crn.base.fontes import FonteInvalida
